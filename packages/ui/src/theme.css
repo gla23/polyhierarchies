@@ -1,0 +1,78 @@
+/* The Directus admin's theme variables, for running the components outside it. Read from the
+   admin's computed styles (Directus 12, this instance's project colour), light then dark. Only the
+   ones the components use: add to both blocks when a component needs another. Never imported by an
+   extension, where the admin supplies the real ones. */
+
+:root {
+	--theme--primary: #02ccfe;
+	--theme--primary-background: color-mix(in srgb, #fff, #02ccfe 10%);
+	--theme--secondary: #ff99dd;
+	--theme--warning: #ffa439;
+	--theme--danger: #e35169;
+	--theme--background: #fff;
+	--theme--background-normal: #f0f4f9;
+	--theme--background-subdued: #f7fafc;
+	--theme--background-accent: #e4eaf1;
+	--theme--foreground: #4f5464;
+	--theme--foreground-accent: #172940;
+	--theme--foreground-subdued: #a2b5cd;
+	--theme--border-color: #e4eaf1;
+	--theme--border-color-accent: #d3dae4;
+	--theme--border-color-subdued: #f0f4f9;
+	--theme--border-radius: 0.375rem;
+	--theme--border-width: 1px;
+	--theme--fonts--sans--font-family: 'Inter', system-ui;
+	--theme--fonts--monospace--font-family: 'Fira Mono', monospace;
+	--theme--form--field--input--background: #fff;
+	--theme--form--field--input--border-color: #e4eaf1;
+	--theme--form--field--input--border-color-hover: #d3dae4;
+	--theme--form--field--input--foreground: #4f5464;
+	--theme--form--field--input--padding: 0.875rem;
+	--theme--popover--menu--background: #fafcfd;
+	--icon-size-default: 1.25rem;
+	color-scheme: light;
+}
+
+/* Written twice — for the system setting, and for the playground's explicit toggle — as a media
+   query can't be combined with an attribute selector into one rule */
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme='light']) {
+		--theme--primary-background: color-mix(in srgb, #0d1117, #02ccfe 10%);
+		--theme--background: #0d1117;
+		--theme--background-normal: #21262e;
+		--theme--background-subdued: #161b22;
+		--theme--background-accent: #30363d;
+		--theme--foreground: #c9d1d9;
+		--theme--foreground-accent: #f0f6fc;
+		--theme--foreground-subdued: #666672;
+		--theme--border-color: #21262e;
+		--theme--border-color-accent: #30363d;
+		--theme--border-color-subdued: #21262d;
+		--theme--form--field--input--background: #0d1117;
+		--theme--form--field--input--border-color: #21262e;
+		--theme--form--field--input--border-color-hover: #30363d;
+		--theme--form--field--input--foreground: #c9d1d9;
+		--theme--popover--menu--background: #161b22;
+		color-scheme: dark;
+	}
+}
+
+:root[data-theme='dark'] {
+	--theme--primary-background: color-mix(in srgb, #0d1117, #02ccfe 10%);
+	--theme--background: #0d1117;
+	--theme--background-normal: #21262e;
+	--theme--background-subdued: #161b22;
+	--theme--background-accent: #30363d;
+	--theme--foreground: #c9d1d9;
+	--theme--foreground-accent: #f0f6fc;
+	--theme--foreground-subdued: #666672;
+	--theme--border-color: #21262e;
+	--theme--border-color-accent: #30363d;
+	--theme--border-color-subdued: #21262d;
+	--theme--form--field--input--background: #0d1117;
+	--theme--form--field--input--border-color: #21262e;
+	--theme--form--field--input--border-color-hover: #30363d;
+	--theme--form--field--input--foreground: #c9d1d9;
+	--theme--popover--menu--background: #161b22;
+	color-scheme: dark;
+}
