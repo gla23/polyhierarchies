@@ -288,10 +288,18 @@ function shiftedControlsWidth(depth: number) {
 	let width = controlIconWidth + depth * controlIconWidth;
 	if (props.showSelect !== 'none')
 		width += controlIconWidth;
-	if (props.showManualSort)
+	if (props.showManualSort && !mergedHandle.value)
 		width += controlIconWidth;
 	return width;
 }
+
+/**
+ * A nesting table's chevron is also its drag handle: a folder folds on a click and moves on a drag,
+ * as in VS Code or Finder, and a leaf shows the handle in the chevron's place. One icon fewer on
+ * every row, and each row's first mark sits at its own level. A flat table keeps its handle.
+ */
+// eslint-disable-next-line @typescript-eslint/no-use-before-define
+const mergedHandle = computed(() => props.showManualSort && gridTemplateTreeColumnWidth.value > 0);
 
 /**
  * Each column's width as drawn. A stored width is for the content alone; the last shifted column
@@ -346,7 +354,7 @@ function getControlColumnWidth() {
 	if (props.showSelect !== 'none')
 		controlColumnWidth += controlIconWidth;
 
-	if (props.showManualSort)
+	if (props.showManualSort && !mergedHandle.value)
 		controlColumnWidth += controlIconWidth;
 
 	// The indent reserve, plus the chevron slot every row of a nesting table keeps
@@ -411,11 +419,11 @@ const {
 	controlIconWidth,
 });
 
+const foldableItems = computed(() => internalItems.value.filter((item) => item[childrenKey]?.length));
 /** Every item with children on this page folded, so the header's chevron unfolds rather than folds */
-const allFolded = computed(() => {
-	const parents = internalItems.value.filter((item) => item[childrenKey]?.length);
-	return parents.length > 0 && parents.every((item) => item[collapsedKey]);
-});
+const allFolded = computed(
+	() => foldableItems.value.length > 0 && foldableItems.value.every((item) => item[collapsedKey]),
+);
 
 /**
  * ⌘/Ctrl-clicking a chevron folds or unfolds everything inside the item, leaving the item itself as
@@ -495,7 +503,8 @@ function chevronHint(item: Item) {
 	const verb = item[collapsedKey] ? 'Unfold' : 'Fold';
 	if (reach === 'siblings')
 		return `${verb} this and its siblings`;
-	return `${reachKeys.inside}-click: everything inside\n${reachKeys.siblings}-click: with its siblings`;
+	const modifiers = `${reachKeys.inside}-click: everything inside\n${reachKeys.siblings}-click: with its siblings`;
+	return mergedHandle.value && !props.disabled ? `Drag to move\n${modifiers}` : modifiers;
 }
 
 function onChevronClick(item: Item, event: MouseEvent) {
@@ -893,6 +902,8 @@ function useTreeView({
 				:tree-view="gridTemplateTreeColumnWidth > 0"
 				:drawn-widths="drawnHeaderWidths"
 				:all-folded="allFolded"
+				:can-fold-all="foldableItems.length > 1"
+				:hierarchy-available="!!parentField"
 				@toggle-fold-all="setAllCollapsed(!allFolded)"
 				@toggle-select-all="onToggleSelectAll"
 				@update:sort="updateSort"

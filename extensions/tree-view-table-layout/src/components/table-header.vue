@@ -33,6 +33,10 @@ const props = withDefaults(
 		drawnWidths?: Record<string, number>;
 		/** Every item with children folded: the chevron over the rows' ones unfolds them all */
 		allFolded?: boolean;
+		/** More than one item has children: with one, its own chevron does the same */
+		canFoldAll?: boolean;
+		/** A parent field is set, so turning manual sorting on would show the hierarchy */
+		hierarchyAvailable?: boolean;
 	}>(),
 	{
 		showSelect: 'none',
@@ -233,6 +237,7 @@ function toggleManualSort() {
 						class="chevron-slot"
 					>
 						<button
+							v-if="canFoldAll"
 							v-tooltip="allFolded ? 'Unfold all' : 'Fold all'"
 							type="button"
 							class="fold-all"
@@ -243,11 +248,14 @@ function toggleManualSort() {
 							<v-icon name="expand_more" />
 						</button>
 					</span>
+					<!-- Nesting, the rows' handles are their chevrons, so the header has no column for this:
+					     sorting by a column's header leaves manual sorting, as anywhere in Directus -->
 					<button
-						v-if="showManualSort"
+						v-if="showManualSort && !treeView"
 						class="manual manual-btn"
 						:class="{
 							'sorted-manually': sort.by === manualSortKey,
+							'invite': hierarchyAvailable && sort.by !== manualSortKey,
 						}"
 						@click="toggleManualSort"
 					>
@@ -498,11 +506,13 @@ function toggleManualSort() {
 
 	/* The rows' chevrons, one level up: turned the same way when everything is folded */
 	.fold-all {
+		--v-icon-size: 24px;
+
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		padding: 0;
-		color: var(--theme--foreground-subdued);
+		color: var(--theme--foreground-accent);
 		background: none;
 		border: none;
 		cursor: pointer;
@@ -512,8 +522,6 @@ function toggleManualSort() {
 		}
 
 		&.all-folded {
-			color: var(--theme--foreground);
-
 			.v-icon {
 				transform: rotate(90deg);
 			}
@@ -550,6 +558,11 @@ function toggleManualSort() {
 
 		&.sorted-manually {
 			color: var(--theme--foreground);
+		}
+
+		/* Off, it's the way into the hierarchy, so it says so */
+		&.invite {
+			color: var(--theme--primary);
 		}
 	}
 

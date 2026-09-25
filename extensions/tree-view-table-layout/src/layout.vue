@@ -93,6 +93,26 @@ const system = inject<Record<string, any>>('system')!;
 // CORE CHANGES
 const { sortAllowed } = useCollectionPermissions(collection);
 
+/**
+ * Why a collection with a parent field is showing flat. The hierarchy only shows while sorting
+ * manually, which isn't obvious, and not at all while searching or filtering, as a filtered list can
+ * leave items without their parents.
+ */
+const hierarchyHint = computed(() => {
+	if (!props.parentField || !props.sortField || !sortAllowed.value)
+		return null;
+	if (props.isFiltered)
+		return 'The hierarchy is hidden while searching or filtering, as that can leave items without their parents.';
+	if (props.tableSort?.by !== props.sortField)
+		return 'Sorted by a column, so showing a flat list. Sort manually to show the hierarchy, then fold it and drag items into place.';
+	return null;
+});
+
+function showHierarchy() {
+	if (props.sortField)
+		props.onSortChange({ by: props.sortField, desc: false });
+}
+
 function useCollectionPermissions(collection: Ref<string>) {
 	const { usePermissionsStore, useUserStore } = system.stores;
 	const permissionsStore = usePermissionsStore();
@@ -174,6 +194,22 @@ function removeField(fieldKey: string) {
 
 <template>
 	<div class="custom-layout">
+		<v-notice
+			v-if="hierarchyHint"
+			class="hierarchy-hint"
+			type="info"
+		>
+			<div class="hint-body">
+				<span>{{ hierarchyHint }}</span>
+				<v-button
+					v-if="!isFiltered"
+					small
+					@click="showHierarchy"
+				>
+					Show the hierarchy
+				</v-button>
+			</div>
+		</v-notice>
 		<CustomVTable
 			v-if="loading || (itemCount && itemCount > 0 && !error)"
 			ref="table"
@@ -383,6 +419,19 @@ function removeField(fieldKey: string) {
 	display: contents;
 	margin: var(--content-padding);
 	margin-bottom: var(--content-padding-bottom);
+}
+
+.hierarchy-hint {
+	margin: 0 var(--content-padding) 16px;
+
+	/* Its own element, not the notice's inner ones, which change between Directus versions */
+	.hint-body {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 16px;
+		align-items: center;
+		justify-content: space-between;
+	}
 }
 
 .v-table {

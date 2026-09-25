@@ -15,12 +15,15 @@ export const tasks = fromOutline(
 	},
 	`
 Home
+  Bleed radiators
   Garden
     Mow lawn
     Plant bulbs
+  Descale kettle
   Repairs
     Fix bike
     Replace fence panel
+  Test smoke alarms
 Errands
   Buy seeds
   Fix bike
@@ -33,6 +36,7 @@ Outdoors
 Weekend
   Replace fence panel
   Plant bulbs
+  Bleed radiators
 Garden
   Buy seeds
 ---
@@ -50,6 +54,9 @@ Buy seeds ~ Plant bulbs
 		'Fix bike': { icon: 'lucide:bike', fields: { due: 'Fri', effort: 1.5, done: false } },
 		'Replace fence panel': { icon: 'lucide:fence', fields: { due: 'Sat', effort: 3, done: false } },
 		'Buy seeds': { fields: { due: 'Thu', effort: 0.5, done: true } },
-		'Return library books': { icon: 'lucide:book', fields: { due: 'Mon', effort: 0.5, done: true } }
+		'Return library books': { icon: 'lucide:book', fields: { due: 'Mon', effort: 0.5, done: true } },
+		'Bleed radiators': { icon: 'lucide:heater', fields: { due: 'Sat', effort: 0.5, done: false } },
+		'Descale kettle': { fields: { due: 'Wed', effort: 0.25, done: true } },
+		'Test smoke alarms': { icon: 'lucide:siren', fields: { due: 'Mon', effort: 0.25, done: false } }
 	}
 );

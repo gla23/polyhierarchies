@@ -48,6 +48,7 @@ const cssHeight = computed(() => {
 	return {
 		tableRow: `${props.height + 2}px`,
 		renderTemplateImage: `${props.height - 16}px`,
+		leafMark: `${Math.round((props.height + 2) * 0.55)}px`,
 	};
 });
 
@@ -60,6 +61,43 @@ const { onMouseDown, onClick } = usePreventClickAfterDragging({
 	mouseDownHandler: onSortStart,
 	clickHandler: (event: MouseEvent) => emit('click', event),
 });
+
+/**
+ * The merged chevron starts a drag only once the pointer has moved, as a plain click on the handle
+ * already runs a whole sort (renumbering every row) and folding shouldn't. The click that ends a
+ * drag is ignored, so letting go never folds.
+ */
+let chevronDragged = false;
+
+function onChevronMouseDown(down: MouseEvent) {
+	if (down.button !== 0)
+		return;
+	// As the handle does, so dragging doesn't select text; the click still comes
+	down.preventDefault();
+	const move = (moved: MouseEvent) => {
+		if (Math.hypot(moved.clientX - down.clientX, moved.clientY - down.clientY) < 4)
+			return;
+		chevronDragged = true;
+		stop();
+		// From where the press began, so the sideways drag that nests measures from there
+		onMouseDown(props.item, down);
+	};
+	const up = () => {
+		stop();
+		setTimeout(() => (chevronDragged = false), 0);
+	};
+	const stop = () => {
+		document.removeEventListener('mousemove', move);
+		document.removeEventListener('mouseup', up);
+	};
+	document.addEventListener('mousemove', move);
+	document.addEventListener('mouseup', up);
+}
+
+function onChevronClick(event: MouseEvent) {
+	if (!chevronDragged)
+		emit('toggle-children', event);
+}
 
 function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 	let dragging = false;
@@ -117,19 +155,36 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 						v-tooltip="foldHint"
 						type="button"
 						class="collapse-btn"
-						:class="{ 'children-collapsed': childrenCollapsed, 'fold-target': foldTarget }"
+						:class="{
+							'children-collapsed': childrenCollapsed,
+							'fold-target': foldTarget,
+							'movable': showManualSort && sortedManually,
+						}"
 						:aria-label="childrenCollapsed ? 'Unfold' : 'Fold'"
 						:aria-expanded="!childrenCollapsed"
-						@click.stop="$emit('toggle-children', $event)"
+						@mousedown="showManualSort && onChevronMouseDown($event)"
+						@click.stop="onChevronClick"
 						@pointerenter="$emit('chevron-hover', $event)"
 						@pointermove="$emit('chevron-hover', $event)"
 						@pointerleave="$emit('chevron-hover', null)"
 					>
 						<v-icon name="expand_more" />
 					</button>
+					<v-icon
+						v-else-if="showManualSort"
+						name="drag_handle"
+						class="drag-handle manual"
+						:class="{ 'sorted-manually': sortedManually, nestable }"
+						@click.stop
+						@mousedown.prevent="onMouseDown(item, $event)"
+					/>
+					<span
+						v-else
+						class="leaf-mark"
+					/>
 				</span>
 				<v-icon
-					v-if="showManualSort"
+					v-if="showManualSort && !treeView"
 					name="drag_handle"
 					class="drag-handle manual"
 					:class="{ 'sorted-manually': sortedManually, nestable }"
@@ -199,8 +254,22 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 .chevron-slot {
 	display: flex;
 	flex-shrink: 0;
+	align-items: center;
 	justify-content: center;
 	width: 28px;
+}
+
+/* A leaf's first mark sits at its own level, as a chevron does, or its drag handle lines up with
+   the chevrons a level deeper and it looks like it's inside the folder above. Upright, like a tree's
+   guide line: a dash would read as collapse. A little over half the row, so a run of them nearly
+   meets but plainly doesn't: joined, they'd claim to be guide lines, broken wherever a sibling
+   folder has a chevron. */
+.leaf-mark {
+	width: 2px;
+	height: v-bind('cssHeight.leafMark');
+	background: var(--theme--foreground-subdued);
+	border-radius: 1px;
+	opacity: 0.5;
 }
 
     .table-row {
@@ -281,8 +350,11 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 		pointer-events: none;
 	}
 
+	/* Full strength open or folded, and a size up from the other controls' icons (20px here), as
+	   it's the one that shows the hierarchy */
 	.collapse-btn {
-		--v-icon-color: var(--theme--foreground-subdued);
+		--v-icon-color: var(--theme--foreground-accent);
+		--v-icon-size: 24px;
 
 		display: flex;
 		align-items: center;
@@ -300,8 +372,12 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 		}
 
 		&.children-collapsed {
-			--v-icon-color: var(--theme--foreground);
 			transform: rotate(90deg);
+		}
+
+		/* Also the row's drag handle: the handle's cursor, not its colours */
+		&.movable {
+			cursor: move;
 		}
 
 		/* Will change with a ⌘ or ⌥ click on the hovered chevron */

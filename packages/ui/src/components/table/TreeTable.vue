@@ -18,8 +18,10 @@ const props = withDefaults(
 		indent?: number;
 		/** Every other placement as a terminal duplicate, or drawn in full as a mirror */
 		repeat?: Repeat;
+		/** One control that folds when clicked and moves when dragged, or a chevron then a handle */
+		handle?: 'separate' | 'merged';
 	}>(),
-	{ density: 'cosy', motion: 'auto', indent: 28, repeat: 'once' }
+	{ density: 'cosy', motion: 'auto', indent: 28, repeat: 'once', handle: 'merged' }
 );
 const focus = defineModel<string | null>('focus', { default: null });
 /** How many columns, from the first, move with the hierarchy (see `template`) */
@@ -50,7 +52,10 @@ const width = (key: string) => widths[key] ?? fitted.value[key] ?? 140;
 const minWidth = 48;
 
 /** Handle (when editable), checkbox and chevron */
-const controlsWidth = computed(() => (props.editor ? 28 : 0) + 28 + 28);
+/** Merged only means something while editing: read only, there's no handle to merge */
+const merged = computed(() => props.handle === 'merged' && !!props.editor);
+/** Chevron, handle (when editable and not merged into it) and checkbox */
+const controlsWidth = computed(() => (props.editor && !merged.value ? 28 : 0) + 28 + 28);
 const shifted = computed(() => Math.min(Math.max(0, shiftedColumns.value), columns.value.length));
 
 /** The table's own font, read once it's on the page; until then text is guessed from its length */
@@ -270,7 +275,7 @@ watch(shifted, () => {
 			<div class="row header" role="row" :style="{ gridTemplateColumns: template(0) }">
 				<div class="cell controls">
 					<span class="icon-button" />
-					<span v-if="editor" class="handle-space" />
+					<span v-if="editor && !merged" class="handle-space" />
 					<input
 						type="checkbox"
 						aria-label="Select every row"
@@ -324,8 +329,24 @@ watch(shifted, () => {
 			>
 				<div class="cell controls" :style="{ paddingLeft: `${row.depth * indent}px` }">
 					<!-- First, so a leaf's empty slot reads as indentation rather than a gap before its name -->
+					<!-- Merged: the folder's chevron is also its handle. A drag never folds on release, as the
+					     browser sends no click after one. -->
 					<button
-						v-if="row.hasChildren"
+						v-if="row.hasChildren && merged"
+						type="button"
+						class="icon-button toggle grab"
+						:class="{ open: row.open }"
+						:aria-label="row.open ? 'Collapse' : 'Expand'"
+						:title="`Click to ${row.open ? 'fold' : 'unfold'}, drag to move; hold Alt while dragging to add a parent instead`"
+						draggable="true"
+						@click.stop="tree.toggle(row)"
+						@dragstart="drop.start($event, row)"
+						@dragend="drop.end"
+					>
+						<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+					</button>
+					<button
+						v-else-if="row.hasChildren"
 						type="button"
 						class="icon-button toggle"
 						:class="{ open: row.open }"
@@ -334,9 +355,9 @@ watch(shifted, () => {
 					>
 						<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
 					</button>
-					<span v-else class="icon-button" />
+					<span v-else-if="!merged" class="icon-button leaf" />
 					<button
-						v-if="editor"
+						v-if="editor && (!merged || !row.hasChildren)"
 						type="button"
 						class="icon-button handle"
 						draggable="true"
@@ -539,8 +560,13 @@ input[type='checkbox'] {
 	color: var(--theme--foreground);
 }
 
-.handle {
+.handle,
+.toggle.grab {
 	cursor: grab;
+}
+
+.toggle.grab:active {
+	cursor: grabbing;
 }
 
 .icon-button svg {
@@ -551,7 +577,33 @@ input[type='checkbox'] {
 	stroke-linecap: round;
 }
 
+/* A leaf's first mark sits at its own level, as a chevron does, or the handle lines up with the
+   chevrons a level deeper and it looks like it's inside the folder above. Upright, like a tree's
+   guide line: a dash would read as collapse. A little over half the row, so a run of them nearly
+   meets but plainly doesn't: joined, they'd claim to be guide lines, broken wherever a sibling
+   folder has a chevron. */
+.icon-button.leaf {
+	align-items: center;
+	justify-content: center;
+	cursor: default;
+}
+
+.icon-button.leaf::after {
+	content: '';
+	width: 2px;
+	height: calc(var(--row-height) * 0.55);
+	background: var(--theme--foreground-subdued);
+	border-radius: 1px;
+	opacity: 0.5;
+}
+
+/* Full strength open or folded, and a size up from the other controls, as it shows the hierarchy */
+.toggle {
+	color: var(--theme--foreground-accent);
+}
+
 .toggle svg {
+	width: 115%;
 	transition: transform 150ms var(--ease-out);
 }
 

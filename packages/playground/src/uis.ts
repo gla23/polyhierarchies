@@ -129,6 +129,18 @@ export const uis: UiEntry[] = [
 				min: 8,
 				max: 64,
 				about: 'How far each level steps in. 28 is what Directus uses.'
+			},
+			{
+				key: 'handle',
+				label: 'Chevron and drag handle',
+				type: 'choice',
+				default: 'merged',
+				choices: [
+					{ value: 'separate', label: 'Separate' },
+					{ value: 'merged', label: 'Merged' }
+				],
+				about:
+					"Separate is Directus's: a chevron to fold, then a handle to drag. Merged makes them one control, as a folder in VS Code or Finder opens on a click and moves on a drag: a folder's chevron folds when clicked and moves when dragged, and a leaf, with nothing to fold, shows the handle. One icon fewer on every row, and each row's first mark sits at its own level. While editing only: read only, there's nothing to drag."
 			}
 		]
 	},
