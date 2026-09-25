@@ -107,13 +107,18 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 					v-if="treeView"
 					class="chevron-slot"
 				>
-					<v-icon
+					<!-- A real button, which a v-icon with a click listener isn't: reachable by Tab and Vimium -->
+					<button
 						v-if="hasChildren"
-						name="expand_more"
+						type="button"
 						class="collapse-btn"
 						:class="{ 'children-collapsed': childrenCollapsed }"
+						:aria-label="childrenCollapsed ? 'Unfold' : 'Fold'"
+						:aria-expanded="!childrenCollapsed"
 						@click.stop="$emit('toggle-children')"
-					/>
+					>
+						<v-icon name="expand_more" />
+					</button>
 				</span>
 				<v-icon
 					v-if="showManualSort"
@@ -271,6 +276,14 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 	.collapse-btn {
 		--v-icon-color: var(--theme--foreground-subdued);
 
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
+		background: none;
+		border: none;
+		border-radius: var(--theme--border-radius);
+		cursor: pointer;
 		transition: transform 150ms cubic-bezier(0.2, 0, 0, 1);
 
 		&:hover,
