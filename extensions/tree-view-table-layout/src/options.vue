@@ -12,6 +12,7 @@ interface Props {
 	tableSpacing: 'compact' | 'cozy' | 'comfortable';
 	parentField: string | null;
 	shiftedColumns: number;
+	showGuides: boolean;
 	sortField: string;
 	collection: string;
 	fieldsInCollection: any;
@@ -24,6 +25,7 @@ const emit = defineEmits([
 	'update:tableSpacing',
 	'update:parentField',
 	'update:shiftedColumns',
+	'update:showGuides',
 	'update:activeFields',
 	'update:fields',
 ]);
@@ -33,6 +35,7 @@ const { t } = useI18n();
 const tableSpacingWritable = useSync(props, 'tableSpacing', emit);
 const parentFieldWritable = useSync(props, 'parentField', emit);
 const shiftedColumnsWritable = useSync(props, 'shiftedColumns', emit);
+const showGuidesWritable = useSync(props, 'showGuides', emit);
 
 const keys = /Mac|iPhone|iPad/.test(navigator.platform)
 	? { inside: '⌘', siblings: '⌥' }
@@ -130,6 +133,11 @@ const selfReferencingM2oFields = computed(() => {
 		<div class="type-label">
 			Folding
 		</div>
+		<v-checkbox
+			v-model="showGuidesWritable"
+			block
+			label="Lines down each open item"
+		/>
 		<small class="type-note">Click a chevron to fold or unfold that item. {{ keys.inside }}-click
 			to fold or unfold everything inside it, leaving the item itself as it is: if any of it is
 			open it all folds, otherwise it all unfolds. {{ keys.siblings }}-click to fold or unfold it and

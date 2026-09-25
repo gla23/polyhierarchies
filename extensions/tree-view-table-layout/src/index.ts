@@ -90,6 +90,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		});
 
 		const shiftedColumns = syncRefProperty(layoutOptions, 'shiftedColumns', 1);
+		const showGuides = syncRefProperty(layoutOptions, 'showGuides', true);
 
 		const { onClick } = useLayoutClickHandler({
 			props,
@@ -168,6 +169,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			tableSpacing,
 			parentField,
 			shiftedColumns,
+			showGuides,
 			primaryKeyField,
 			info,
 			showingCount,

@@ -20,8 +20,10 @@ const props = withDefaults(
 		repeat?: Repeat;
 		/** One control that folds when clicked and moves when dragged, or a chevron then a handle */
 		handle?: 'separate' | 'merged';
+		/** The faint lines from an open item's chevron down everything inside it */
+		guides?: 'shown' | 'hidden';
 	}>(),
-	{ density: 'cosy', motion: 'auto', indent: 28, repeat: 'once', handle: 'merged' }
+	{ density: 'cosy', motion: 'auto', indent: 28, repeat: 'once', handle: 'merged', guides: 'shown' }
 );
 const focus = defineModel<string | null>('focus', { default: null });
 /** How many columns, from the first, move with the hierarchy (see `template`) */
@@ -208,6 +210,36 @@ function format(value: FieldValue | undefined, type: string) {
 	return String(value);
 }
 
+/**
+ * Tree guides: a faint line from under an open item's chevron down everything inside it, curving
+ * at the bottom of the last row so it wraps the whole of it; curving mid-row made the last item look
+ * half outside. Each row draws its share, a line for every ancestor, so the lines fold with the rows.
+ */
+type Guide = { level: number; kind: 'through' | 'end' | 'stub' };
+function guidesOf(row: TreeRow): Guide[] {
+	const guides: Guide[] = [];
+	if (props.guides === 'hidden') return guides;
+	// The row is the last of an ancestor's rows if it's closed and last child all the way down to it
+	let lastBelow = !row.open;
+	for (let level = row.depth - 1; level >= 0; level--) {
+		lastBelow &&= props.graph.children(row.path[level]!).at(-1) === row.path[level + 1];
+		guides.push({ level, kind: lastBelow ? 'end' : 'through' });
+	}
+	if (row.open) guides.push({ level: row.depth, kind: 'stub' });
+	return guides;
+}
+
+/**
+ * Where the row's bottom divider starts: after the outermost guide curving into it, so the two join
+ * in one stroke, rather than the divider running on past it. The curve ends a chevron's middle
+ * (12px) and its reach (the indent less 14px) along from its level.
+ */
+function dividerStart(row: TreeRow) {
+	const ends = guidesOf(row).filter((guide) => guide.kind === 'end');
+	if (!ends.length) return undefined;
+	return Math.min(...ends.map((guide) => guide.level)) * props.indent + props.indent - 2;
+}
+
 const fieldOf = (row: TreeRow, key: string) => props.graph.node(row.id).fields?.[key];
 
 /** Clicking a row opens it, as Directus opens the item page; the handle is for moving it */
@@ -322,12 +354,23 @@ watch(shifted, () => {
 					},
 					drop.zoneOf(row) && `drop-${drop.zoneOf(row)}`
 				]"
-				:style="{ gridTemplateColumns: template(row.depth) }"
+				:style="{
+					gridTemplateColumns: template(row.depth),
+					'--divider-start': dividerStart(row) === undefined ? undefined : `${dividerStart(row)}px`
+				}"
+				:data-divider-inset="dividerStart(row) !== undefined || undefined"
 				@click="select(row)"
 				@dragover="drop.over($event, row)"
 				@drop="drop.drop($event, row)"
 			>
-				<div class="cell controls" :style="{ paddingLeft: `${row.depth * indent}px` }">
+				<div class="cell controls" :style="{ paddingLeft: `${row.depth * indent}px`, '--indent': `${indent}px` }">
+					<span
+						v-for="guide in guidesOf(row)"
+						:key="`${guide.level}-${guide.kind}`"
+						class="guide"
+						:class="guide.kind"
+						:style="{ left: `${guide.level * indent + 12}px` }"
+					/>
 					<!-- First, so a leaf's empty slot reads as indentation rather than a gap before its name -->
 					<!-- Merged: the folder's chevron is also its handle. A drag never folds on release, as the
 					     browser sends no click after one. -->
@@ -422,17 +465,27 @@ watch(shifted, () => {
 }
 
 .row:not(.header):hover {
-	background: var(--theme--background-subdued);
+	background-color: var(--theme--background-subdued);
 }
 
 .row.current,
 .row.selected {
-	background: var(--theme--primary-background);
+	background-color: var(--theme--primary-background);
 }
 
 /* Holding Alt: everything the focus lives in, lit wherever it appears */
 .row.home {
-	background: color-mix(in srgb, var(--theme--secondary) 20%, transparent);
+	background-color: color-mix(in srgb, var(--theme--secondary) 20%, transparent);
+}
+
+/* Drawn from where the guide curving into it ends, in the border's own space */
+.row[data-divider-inset] {
+	border-bottom-color: transparent;
+	background-image: linear-gradient(var(--theme--border-color-subdued), var(--theme--border-color-subdued));
+	background-repeat: no-repeat;
+	background-origin: border-box;
+	background-position: var(--divider-start) 100%;
+	background-size: calc(100% - var(--divider-start)) var(--theme--border-width);
 }
 
 .row.duplicate {
@@ -600,6 +653,36 @@ input[type='checkbox'] {
 /* Full strength open or folded, and a size up from the other controls, as it shows the hierarchy */
 .toggle {
 	color: var(--theme--foreground-accent);
+}
+
+/* Down the middle of the chevron's column, past the row's bottom border so the lines don't break,
+   in the dividers' colour so a curve joins its divider as one stroke */
+.guide {
+	position: absolute;
+	width: 0;
+	border-left: var(--theme--border-width) solid var(--theme--border-color-subdued);
+	pointer-events: none;
+}
+
+.guide.through {
+	top: 0;
+	bottom: -1px;
+}
+
+/* From just under the open chevron */
+.guide.stub {
+	top: calc(50% + 14px);
+	bottom: -1px;
+}
+
+/* Round the bottom of the last row and into its divider, closing the item's contents off: a pixel
+   past the row, on the divider's own line, not stacked just above it */
+.guide.end {
+	top: 0;
+	bottom: -1px;
+	width: calc(var(--indent) - 14px);
+	border-bottom: var(--theme--border-width) solid var(--theme--border-color-subdued);
+	border-bottom-left-radius: 6px;
 }
 
 .toggle svg {

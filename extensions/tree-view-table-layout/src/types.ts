@@ -11,6 +11,8 @@ export interface LayoutOptions {
 	parent?: string | null;
 	/** How many columns, from the first, move with the hierarchy */
 	shiftedColumns?: number;
+	/** The faint lines from an open item's chevron down everything inside it */
+	showGuides?: boolean;
 }
 
 export interface LayoutQuery {

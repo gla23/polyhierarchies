@@ -131,6 +131,18 @@ export const uis: UiEntry[] = [
 				about: 'How far each level steps in. 28 is what Directus uses.'
 			},
 			{
+				key: 'guides',
+				label: 'Lines down each open item',
+				type: 'choice',
+				default: 'shown',
+				choices: [
+					{ value: 'shown', label: 'Shown' },
+					{ value: 'hidden', label: 'Hidden' }
+				],
+				about:
+					"A faint line from under an open item's chevron down everything inside it, wrapping round the last row, so it's clear where each item's contents end. Folds with the rows."
+			},
+			{
 				key: 'handle',
 				label: 'Chevron and drag handle',
 				type: 'choice',

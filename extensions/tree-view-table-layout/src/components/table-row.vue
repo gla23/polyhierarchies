@@ -21,6 +21,14 @@ const props = withDefaults(
 		foldTarget?: boolean;
 		/** What clicking the chevron does, with or without a modifier held */
 		foldHint?: string;
+		/** This row's share of the tree's guide lines, by the level of the ancestor each belongs to */
+		guides?: { level: number; kind: 'through' | 'end' | 'stub' }[];
+		/** Its top divider starts where the guide curving into it ends */
+		dividerInset?: boolean;
+		/** Its guides that end go on into the next row, which draws their curves */
+		guidesContinue?: boolean;
+		/** The levels of the guides from the row above that curve onto this row's divider */
+		guideCorners?: number[];
 		showSelect: ShowSelect;
 		showManualSort?: boolean;
 		isSelected?: boolean;
@@ -143,7 +151,25 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 			class="cell controls"
 			:style="indent > 0 ? { paddingLeft: `${indent}px` } : null"
 		>
-			<div class="cell-style">
+			<template v-if="!sorting">
+				<span
+					v-for="guide in guides"
+					:key="`${guide.level}-${guide.kind}`"
+					class="guide"
+					:class="[guide.kind, { continues: guide.kind === 'end' && guidesContinue }]"
+					:style="{ left: `${guide.level * 28 + 14}px` }"
+				/>
+				<span
+					v-for="level in guideCorners"
+					:key="`corner-${level}`"
+					class="guide corner"
+					:style="{ left: `${level * 28 + 14}px` }"
+				/>
+			</template>
+			<div
+				class="cell-style"
+				:class="{ 'divider-inset': dividerInset }"
+			>
 				<!-- First, so a leaf's empty slot reads as indentation rather than a gap before its content -->
 				<span
 					v-if="treeView"
@@ -259,6 +285,52 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 	width: 28px;
 }
 
+/* Down the middle of the chevron's column, from the top of the row to past its bottom, so a run of
+   rows draws one unbroken line, in the dividers' colour so a curve joins its divider as one stroke */
+.guide {
+	position: absolute;
+	width: 0;
+	border-left: var(--theme--border-width) solid var(--theme--border-color-subdued);
+	pointer-events: none;
+}
+
+.guide.through {
+	top: 0;
+	bottom: -1px;
+}
+
+/* From just under the open chevron */
+.guide.stub {
+	top: calc(50% + 13px);
+	bottom: -1px;
+}
+
+/* At the foot of the table, round the bottom of the last row, closing the item's contents off */
+.guide.end {
+	top: 0;
+	bottom: 0;
+	width: 12px;
+	border-bottom: var(--theme--border-width) solid var(--theme--border-color-subdued);
+	border-bottom-left-radius: 6px;
+}
+
+/* With a row below, stop where that row's corner takes over */
+.guide.end.continues {
+	bottom: 6px;
+	width: 0;
+	border-bottom: none;
+	border-radius: 0;
+}
+
+/* Drawn by the row whose top border is the divider it curves onto, reaching up into the row above */
+.guide.corner {
+	top: -6px;
+	width: 12px;
+	height: calc(6px + var(--theme--border-width));
+	border-bottom: var(--theme--border-width) solid var(--theme--border-color-subdued);
+	border-bottom-left-radius: 6px;
+}
+
 /* A leaf's first mark sits at its own level, as a chevron does, or its drag handle lines up with
    the chevrons a level deeper and it looks like it's inside the folder above. Upright, like a tree's
    guide line: a dash would read as collapse. A little over half the row, so a run of them nearly
@@ -290,6 +362,12 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 		}
 
 		&.controls {
+			/* For the tree guides, which reach a pixel past the row onto the divider below */
+			position: relative;
+			overflow: visible;
+			/* Which costs a grid item its zero minimum height: without this, controls a little taller
+			   than the row grew its track, pushing the whole row's content down */
+			min-height: 0;
 			padding: 0;
 			display: flex;
 			border-top: 0;
@@ -301,6 +379,17 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 				height: 100%;
 				padding: 8px 0;
 				border-top: var(--theme--border-width) solid var(--theme--border-color-subdued);
+
+				/* Starting where the guide above curves into it: its column's middle (14px) plus the
+				   curve's reach (12px) */
+				&.divider-inset {
+					border-top-color: transparent;
+					background-image: linear-gradient(var(--theme--border-color-subdued), var(--theme--border-color-subdued));
+					background-repeat: no-repeat;
+					background-position: 26px 0;
+					background-size: calc(100% - 26px) var(--theme--border-width);
+					background-origin: border-box;
+				}
 			}
 		}
 	}

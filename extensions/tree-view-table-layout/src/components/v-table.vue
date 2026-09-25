@@ -51,6 +51,8 @@ const props = withDefaults(
 		collection: string;
 		/** How many columns, from the first, move with the hierarchy (see `rowGridColumns`) */
 		shiftedColumns?: number;
+		/** The faint lines from an open item's chevron down everything inside it */
+		showGuides?: boolean;
 	}>(),
 	{
 		itemKey: 'id',
@@ -73,6 +75,7 @@ const props = withDefaults(
 		disabled: false,
 		clickable: true,
 		shiftedColumns: 1,
+		showGuides: true,
 	},
 );
 
@@ -417,6 +420,71 @@ const {
 	collection: toRef(props, 'collection'),
 	sortIsManual,
 	controlIconWidth,
+});
+
+/**
+ * Tree guides: a faint line from under an open item's chevron down everything inside it, curving
+ * at the bottom of the last row so it wraps the whole of it; curving mid-row made the last item look
+ * half outside. Each row draws its share, a line for every ancestor, so the lines fold with the rows.
+ */
+type Guide = { level: number; kind: 'through' | 'end' | 'stub' };
+const guidesById = computed(() => {
+	const guides = new Map<PrimaryKey, Guide[]>();
+	if (!props.showGuides || !gridTemplateTreeColumnWidth.value)
+		return guides;
+	const byId = new Map(internalItems.value.map((item) => [item[props.itemKey], item]));
+	const lastChild = new Map<PrimaryKey, PrimaryKey>();
+	for (const item of internalItems.value) {
+		if (byId.has(item[itemParent]))
+			lastChild.set(item[itemParent], item[props.itemKey]);
+	}
+	for (const item of internalItems.value) {
+		// Its ancestors on this page, top first; stopping at one seen already, should the data loop
+		const path: PrimaryKey[] = [item[props.itemKey]];
+		for (let parent = item[itemParent]; byId.has(parent) && !path.includes(parent); parent = byId.get(parent)![itemParent])
+			path.unshift(parent);
+		const depth = path.length - 1;
+		const open = !!item[childrenKey]?.length && !item[collapsedKey];
+		const own: Guide[] = [];
+		// The row is the last of an ancestor's rows if it's closed and last child all the way down
+		let lastBelow = !open;
+		for (let level = depth - 1; level >= 0; level--) {
+			lastBelow &&= lastChild.get(path[level]!) === path[level + 1];
+			own.push({ level, kind: lastBelow ? 'end' : 'through' });
+		}
+		if (open)
+			own.push({ level: depth, kind: 'stub' });
+		guides.set(item[props.itemKey], own);
+	}
+	return guides;
+});
+
+/**
+ * Where guides end, the curve is drawn by the next row shown, as its top border is the divider it
+ * curves onto: drawn by the row above, the next row paints over it. So the ending row's lines stop
+ * short (`continuing`), the next row draws the corners (`cornersBelow`), and its divider starts
+ * where the outermost corner ends (`insets`). That row is always at the outermost corner's depth.
+ */
+const guideJoins = computed(() => {
+	const continuing = new Set<PrimaryKey>();
+	const cornersBelow = new Map<PrimaryKey, number[]>();
+	const insets = new Set<PrimaryKey>();
+	let ended: { id: PrimaryKey; levels: number[] } | null = null;
+	for (const item of internalItems.value) {
+		if (item[collapsedParentsKey]?.length)
+			continue;
+		if (ended) {
+			continuing.add(ended.id);
+			cornersBelow.set(item[props.itemKey], ended.levels);
+			if (Math.min(...ended.levels) === (item[itemDepth] ?? 0))
+				insets.add(item[props.itemKey]);
+		}
+		const levels = (guidesById.value.get(item[props.itemKey]) ?? [])
+			.filter((guide) => guide.kind === 'end')
+			.map((guide) => guide.level);
+		ended = levels.length ? { id: item[props.itemKey], levels } : null;
+	}
+	return { continuing, cornersBelow, insets };
 });
 
 const foldableItems = computed(() => internalItems.value.filter((item) => item[childrenKey]?.length));
@@ -1004,6 +1072,10 @@ function useTreeView({
 						:height="rowHeight"
 						@mouseover.prevent="onDragOver"
 						:fold-target="foldTargets.has(item[itemKey])"
+						:guides="guidesById.get(item[itemKey])"
+						:divider-inset="guideJoins.insets.has(item[itemKey])"
+						:guides-continue="guideJoins.continuing.has(item[itemKey])"
+						:guide-corners="guideJoins.cornersBelow.get(item[itemKey])"
 						:fold-hint="chevronHint(item)"
 						@toggle-children="onChevronClick(item, $event)"
 						@chevron-hover="onChevronHover(item, $event)"
@@ -1198,8 +1270,9 @@ table.reshaping :deep(th) {
  * itself. Height lays out every frame, so only for a page of rows.
  */
 table.animate-folds :deep(.table-row) {
-	/* Unfolding drops the folded row's own clip at once, so it would spill over the rows below */
-	overflow: hidden;
+	/* Unfolding drops the folded row's own clip at once, so it would spill over the rows below. The
+	   top is left open for the tree guides' corners, which reach up into the row above. */
+	clip-path: inset(-6px 0 0 0);
 	transition:
 		height 150ms cubic-bezier(0.2, 0, 0, 1),
 		opacity 150ms ease-out,

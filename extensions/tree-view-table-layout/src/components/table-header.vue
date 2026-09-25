@@ -273,11 +273,8 @@ function toggleManualSort() {
 						:indeterminate="someItemsSelected"
 						@update:model-value="toggleSelectAll"
 					/>
-
-					<span
-						v-if="showResize"
-						class="resize-handle visual-only"
-					/>
+					<!-- No resize handle's bar here, as the other headers have: the controls can't be
+					     resized, and it sat squashed against the checkbox -->
 				</th>
 			</template>
 

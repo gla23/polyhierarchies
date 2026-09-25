@@ -80,6 +80,7 @@ interface Props {
 	onAlignChange?: (field: 'string', align: 'left' | 'center' | 'right') => void;
 	parentField: string | null;
 	shiftedColumns: number;
+	showGuides: boolean;
 	saveEdits: (edits: Record<PrimaryKey, Item>) => void;
 	isFiltered: boolean;
 }
@@ -104,7 +105,7 @@ const hierarchyHint = computed(() => {
 	if (props.isFiltered)
 		return 'The hierarchy is hidden while searching or filtering, as that can leave items without their parents.';
 	if (props.tableSort?.by !== props.sortField)
-		return 'Sorted by a column, so showing a flat list. Sort manually to show the hierarchy, then fold it and drag items into place.';
+		return 'You are sorting by another column. Swap view to see the hierarchy and drag items into place.';
 	return null;
 });
 
@@ -206,7 +207,7 @@ function removeField(fieldKey: string) {
 					small
 					@click="showHierarchy"
 				>
-					Show the hierarchy
+					Swap view
 				</v-button>
 			</div>
 		</v-notice>
@@ -232,6 +233,7 @@ function removeField(fieldKey: string) {
 			:parent-field
 			:collection
 			:shifted-columns="shiftedColumns"
+			:show-guides="showGuides"
 			@click:row="onRowClick"
 			@update:sort="onSortChange"
 			@update:items="saveEdits"
@@ -422,7 +424,11 @@ function removeField(fieldKey: string) {
 }
 
 .hierarchy-hint {
-	margin: 0 var(--content-padding) 16px;
+	/* The table's own edges (see `table.has-controls` below): it starts a chevron's width into the
+	   gutter, so a notice inset by the gutter both sides started further in and ran past its end */
+	box-sizing: border-box;
+	width: calc(100% - var(--content-padding) * 2);
+	margin: 16px 0 16px max(0px, calc(var(--content-padding) - 28px));
 
 	/* Its own element, not the notice's inner ones, which change between Directus versions */
 	.hint-body {
