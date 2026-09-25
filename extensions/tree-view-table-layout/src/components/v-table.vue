@@ -10,7 +10,7 @@ import type {
 	ItemSelectEvent,
 	Sort,
 } from '../core-clones/components/v-table/types';
-import { useLocalStorage } from '@vueuse/core';
+import { useEventListener, useLocalStorage } from '@vueuse/core';
 import { clone, forEach, pick } from 'lodash';
 import {
 	computed,
@@ -399,6 +399,7 @@ const {
 	onSortUpdate,
 	onToggleChildren,
 	setAllCollapsed,
+	setCollapsed,
 } = useTreeView({
 	internalItems,
 	parentField: toRef(props, 'parentField'),
@@ -415,6 +416,96 @@ const allFolded = computed(() => {
 	const parents = internalItems.value.filter((item) => item[childrenKey]?.length);
 	return parents.length > 0 && parents.every((item) => item[collapsedKey]);
 });
+
+/**
+ * ⌘/Ctrl-clicking a chevron folds or unfolds everything inside the item, leaving the item itself as
+ * it is: folding it too would hide what the click did. Any of them open, they all fold; all folded,
+ * they all unfold. ⌥/Alt-clicking folds or unfolds the item and its siblings, all the way the
+ * clicked one goes. While the key is held over a chevron, the ones that will change are lit.
+ */
+type FoldReach = 'inside' | 'siblings';
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const reachKeys = isMac ? { inside: '⌘', siblings: '⌥' } : { inside: 'Ctrl', siblings: 'Alt' };
+const reachHeld = ref<FoldReach | null>(null);
+const hoveredChevron = ref<PrimaryKey | null>(null);
+
+const reachOf = (event: KeyboardEvent | MouseEvent): FoldReach | null =>
+	event.metaKey || event.ctrlKey ? 'inside' : event.altKey ? 'siblings' : null;
+useEventListener(window, 'keydown', (event) => (reachHeld.value = reachOf(event)));
+useEventListener(window, 'keyup', (event) => (reachHeld.value = reachOf(event)));
+// Released while the window was in the background, the keyup never comes
+useEventListener(window, 'blur', () => (reachHeld.value = null));
+
+function onChevronHover(item: Item, event: PointerEvent | null) {
+	hoveredChevron.value = event ? item[props.itemKey] : null;
+	if (event)
+		reachHeld.value = reachOf(event);
+}
+
+const hasChildren = (item: Item) => !!item[childrenKey]?.length;
+
+function reachFrom(item: Item, reach: FoldReach): PrimaryKey[] {
+	if (reach === 'siblings') {
+		const parent = item[itemParent] ?? null;
+		return internalItems.value
+			.filter((other) => (other[itemParent] ?? null) === parent && hasChildren(other))
+			.map((other) => other[props.itemKey]);
+	}
+	const byId = new Map(internalItems.value.map((other) => [other[props.itemKey], other]));
+	const found = new Set<PrimaryKey>();
+	const visit = (at: Item) => {
+		for (const child of at[childrenKey] ?? []) {
+			const childItem = byId.get(child);
+			if (childItem && hasChildren(childItem) && !found.has(child)) {
+				found.add(child);
+				visit(childItem);
+			}
+		}
+	};
+	visit(item);
+	return [...found];
+}
+
+/** Which way a click goes: the item's own way, or for everything inside, fold unless all are */
+function foldsWith(item: Item, reach: FoldReach | null, targets: PrimaryKey[]) {
+	if (reach !== 'inside')
+		return !item[collapsedKey];
+	const byId = new Map(internalItems.value.map((other) => [other[props.itemKey], other]));
+	return targets.some((id) => !byId.get(id)?.[collapsedKey]);
+}
+
+const hoveredItem = computed(() =>
+	hoveredChevron.value === null
+		? null
+		: internalItems.value.find((item) => item[props.itemKey] === hoveredChevron.value) ?? null,
+);
+const foldTargets = computed(
+	() =>
+		new Set(hoveredItem.value && reachHeld.value ? reachFrom(hoveredItem.value, reachHeld.value) : []),
+);
+
+function chevronHint(item: Item) {
+	const reach = item[props.itemKey] === hoveredChevron.value ? reachHeld.value : null;
+	if (reach === 'inside') {
+		const targets = [...foldTargets.value];
+		if (!targets.length)
+			return 'Nothing inside to fold';
+		return `${foldsWith(item, reach, targets) ? 'Fold' : 'Unfold'} everything inside`;
+	}
+	const verb = item[collapsedKey] ? 'Unfold' : 'Fold';
+	if (reach === 'siblings')
+		return `${verb} this and its siblings`;
+	return `${reachKeys.inside}-click: everything inside\n${reachKeys.siblings}-click: with its siblings`;
+}
+
+function onChevronClick(item: Item, event: MouseEvent) {
+	const reach = reachOf(event);
+	if (!reach)
+		return onToggleChildren(item);
+	const targets = reachFrom(item, reach);
+	if (targets.length)
+		setCollapsed(targets, foldsWith(item, reach, targets));
+}
 
 function useTreeView({
 	internalItems,
@@ -450,6 +541,7 @@ function useTreeView({
 		isCollapsed,
 		initCollapsedChildren,
 		setAllCollapsed,
+		setCollapsed,
 	} = useCollapsible();
 
 	watch(() => props.items, initTreeView);
@@ -472,6 +564,7 @@ function useTreeView({
 		onSortUpdate,
 		onToggleChildren,
 		setAllCollapsed,
+		setCollapsed,
 	};
 
 	function resetIfNoParentSelected(
@@ -681,19 +774,34 @@ function useTreeView({
 			isCollapsed,
 			initCollapsedChildren,
 			setAllCollapsed,
+			setCollapsed,
 		};
 
-		/** Only this page's items are known, so folding adds to what's stored rather than replacing it */
-		function setAllCollapsed(fold: boolean) {
-			const parents = internalItems.value
-				.filter((item) => item[childrenKey]?.length)
-				.map((item) => item[itemKey.value] as PrimaryKey);
-			collapsedState.value = fold ? [...new Set([...collapsedState.value, ...parents])] : [];
+		/** Folds or unfolds these items together, then works out afresh which rows that hides */
+		function setCollapsed(ids: PrimaryKey[], fold: boolean) {
+			const targets = new Set(ids);
+			const state = new Set(collapsedState.value);
+			for (const id of targets)
+				fold ? state.add(id) : state.delete(id);
+			collapsedState.value = [...state];
 			for (const item of internalItems.value) {
-				item[collapsedKey] = fold && !!item[childrenKey]?.length;
+				if (targets.has(item[itemKey.value]))
+					item[collapsedKey] = fold;
 				item[collapsedParentsKey] = [];
 			}
 			initCollapsedChildren();
+		}
+
+		/** Only this page's items are known, so folding adds to what's stored rather than replacing it */
+		function setAllCollapsed(fold: boolean) {
+			if (!fold)
+				collapsedState.value = [];
+			setCollapsed(
+				internalItems.value
+					.filter((item) => item[childrenKey]?.length)
+					.map((item) => item[itemKey.value] as PrimaryKey),
+				fold,
+			);
 		}
 
 		function isCollapsed(id: PrimaryKey) {
@@ -884,7 +992,10 @@ function useTreeView({
 						:has-click-listener="!disabled && clickable"
 						:height="rowHeight"
 						@mouseover.prevent="onDragOver"
-						@toggle-children="onToggleChildren(item)"
+						:fold-target="foldTargets.has(item[itemKey])"
+						:fold-hint="chevronHint(item)"
+						@toggle-children="onChevronClick(item, $event)"
+						@chevron-hover="onChevronHover(item, $event)"
 						@click="
 							!disabled && clickable
 								? $emit('click:row', { item, event: $event })

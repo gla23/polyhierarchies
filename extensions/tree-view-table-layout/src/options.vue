@@ -34,6 +34,10 @@ const tableSpacingWritable = useSync(props, 'tableSpacing', emit);
 const parentFieldWritable = useSync(props, 'parentField', emit);
 const shiftedColumnsWritable = useSync(props, 'shiftedColumns', emit);
 
+const keys = /Mac|iPhone|iPad/.test(navigator.platform)
+	? { inside: '⌘', siblings: '⌥' }
+	: { inside: 'Ctrl', siblings: 'Alt' };
+
 const selfReferencingM2oFields = computed(() => {
 	return props.fieldsInCollection?.filter(
 		(field: Field) =>
@@ -117,6 +121,21 @@ const selfReferencingM2oFields = computed(() => {
 		<small class="type-note">How many columns, from the first, move in with each level. The last of
 			them gives up the indent, so the columns after it stay in one line. 0 indents only the
 			controls.</small>
+	</div>
+
+	<div
+		v-if="parentFieldWritable"
+		class="field"
+	>
+		<div class="type-label">
+			Folding
+		</div>
+		<small class="type-note">Click a chevron to fold or unfold that item. {{ keys.inside }}-click
+			to fold or unfold everything inside it, leaving the item itself as it is: if any of it is
+			open it all folds, otherwise it all unfolds. {{ keys.siblings }}-click to fold or unfold it and
+			its siblings. Hold the key over a chevron to light up the ones that will change. The chevron
+			in the header folds or unfolds every item on the page. Folds are remembered in this
+			browser.</small>
 	</div>
 
 	<div class="field">

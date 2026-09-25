@@ -17,6 +17,10 @@ const props = withDefaults(
 		hasChildren?: boolean;
 		/** The table nests, so every row keeps a chevron slot */
 		treeView?: boolean;
+		/** Will fold or unfold with a ⌘ or ⌥ click on the hovered chevron */
+		foldTarget?: boolean;
+		/** What clicking the chevron does, with or without a modifier held */
+		foldHint?: string;
 		showSelect: ShowSelect;
 		showManualSort?: boolean;
 		isSelected?: boolean;
@@ -38,7 +42,7 @@ const props = withDefaults(
 	},
 );
 
-const emit = defineEmits(['click', 'item-selected', 'toggle-children']);
+const emit = defineEmits(['click', 'item-selected', 'toggle-children', 'chevron-hover']);
 
 const cssHeight = computed(() => {
 	return {
@@ -110,12 +114,16 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 					<!-- A real button, which a v-icon with a click listener isn't: reachable by Tab and Vimium -->
 					<button
 						v-if="hasChildren"
+						v-tooltip="foldHint"
 						type="button"
 						class="collapse-btn"
-						:class="{ 'children-collapsed': childrenCollapsed }"
+						:class="{ 'children-collapsed': childrenCollapsed, 'fold-target': foldTarget }"
 						:aria-label="childrenCollapsed ? 'Unfold' : 'Fold'"
 						:aria-expanded="!childrenCollapsed"
-						@click.stop="$emit('toggle-children')"
+						@click.stop="$emit('toggle-children', $event)"
+						@pointerenter="$emit('chevron-hover', $event)"
+						@pointermove="$emit('chevron-hover', $event)"
+						@pointerleave="$emit('chevron-hover', null)"
 					>
 						<v-icon name="expand_more" />
 					</button>
@@ -295,6 +303,14 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 			--v-icon-color: var(--theme--foreground);
 			transform: rotate(90deg);
 		}
+
+		/* Will change with a ⌘ or ⌥ click on the hovered chevron */
+		&.fold-target,
+		&.fold-target:hover {
+			--v-icon-color: var(--theme--primary);
+
+			background: var(--theme--primary-background);
+		}
 	}
 
 	.append {
@@ -310,5 +326,14 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 			height: v-bind('cssHeight.renderTemplateImage');
 		}
 	}
+}
+</style>
+
+<style>
+/* Directus's tooltip, outside the table so not scoped: the chevron's hint puts each modifier on its
+   own line, and pre-line shows that however the directive inserts the text. Other tooltips have no
+   line breaks, so they're unchanged. */
+#tooltip {
+	white-space: pre-line;
 }
 </style>
