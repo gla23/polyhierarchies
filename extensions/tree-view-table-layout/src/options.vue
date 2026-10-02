@@ -5,6 +5,7 @@ import type { Field } from '@directus/types';
 import { useSync } from '@directus/extensions-sdk';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useFolds } from './folds';
 
 interface Props {
 	fields: string[];
@@ -13,10 +14,10 @@ interface Props {
 	parentField: string | null;
 	shiftedColumns: number;
 	showGuides: boolean;
+	openDepth: number | null;
 	sortField: string;
 	collection: string;
 	fieldsInCollection: any;
-	tableSort: { by: string; desc: boolean } | null;
 }
 
 const props = defineProps<Props>();
@@ -26,6 +27,7 @@ const emit = defineEmits([
 	'update:parentField',
 	'update:shiftedColumns',
 	'update:showGuides',
+	'update:openDepth',
 	'update:activeFields',
 	'update:fields',
 ]);
@@ -36,6 +38,15 @@ const tableSpacingWritable = useSync(props, 'tableSpacing', emit);
 const parentFieldWritable = useSync(props, 'parentField', emit);
 const shiftedColumnsWritable = useSync(props, 'shiftedColumns', emit);
 const showGuidesWritable = useSync(props, 'showGuides', emit);
+const openDepthWritable = useSync(props, 'openDepth', emit);
+
+// Unset (the placeholder) is everything open, so a view that's never been set stays as it was
+const openDepthItems = [
+	{ text: 'None', value: 0 },
+	...[1, 2, 3, 4].map((depth) => ({ text: String(depth), value: depth })),
+];
+
+const { reset: resetFolds } = useFolds(props.collection);
 
 const keys = /Mac|iPhone|iPad/.test(navigator.platform)
 	? { inside: '⌘', siblings: '⌥' }
@@ -54,29 +65,28 @@ const selfReferencingM2oFields = computed(() => {
 </script>
 
 <template>
-	<div
-		v-if="!sortField"
-		class="field"
-	>
-		<v-notice type="warning">
-			Specify a sort field in your data model settings!
-		</v-notice>
-	</div>
-
-	<div
-		v-else
-		class="field"
-	>
+	<div class="field">
 		<div class="type-label">
 			Parent (M2O)
 		</div>
 
 		<v-notice
-			v-if="!selfReferencingM2oFields?.length"
-			type="warning"
+			v-if="!sortField || !selfReferencingM2oFields?.length"
+			type="info"
+			class="setup"
 		>
-			Create an M2O field that references this collection in your data
-			model settings!
+			<div>
+				<p>This layout nests each item under its parent. It needs two fields, set up in this collection's data model settings:</p>
+				<ol>
+					<li :class="{ done: sortField }">
+						A sort field: an integer field, chosen as the collection's sort field
+					</li>
+					<li :class="{ done: selfReferencingM2oFields?.length }">
+						A parent field: a many-to-one field that relates to this same collection
+					</li>
+				</ol>
+				<p>Then choose the parent field here.</p>
+			</div>
 		</v-notice>
 
 		<template v-else>
@@ -92,82 +102,80 @@ const selfReferencingM2oFields = computed(() => {
 			<small
 				v-if="!parentFieldWritable"
 				class="type-note"
-			>Note that selecting a field can immediately update the sort
-				values of your items!</small>
-
-			<small
-				v-if="parentFieldWritable && tableSort?.by !== sortField"
-				class="type-note"
-			>To use the Tree View Table features, be sure to click the
-				<v-icon
-					name="sort"
-					small
-				/>
-				button to enable manual sorting!</small>
+			>The field that holds each item's parent. Choosing one can rewrite your items' sort values.</small>
 		</template>
 	</div>
 
-	<div
-		v-if="parentFieldWritable"
-		class="field"
-	>
-		<div class="type-label">
-			Columns that follow the hierarchy
+	<template v-if="sortField && parentFieldWritable">
+		<div class="field">
+			<div class="type-label">
+				{{ t("layouts.tabular.spacing") }}
+			</div>
+			<v-select
+				v-model="tableSpacingWritable"
+				:items="[
+					{
+						text: t('layouts.tabular.compact'),
+						value: 'compact',
+					},
+					{
+						text: t('layouts.tabular.cozy'),
+						value: 'cozy',
+					},
+					{
+						text: t('layouts.tabular.comfortable'),
+						value: 'comfortable',
+					},
+				]"
+			/>
 		</div>
-		<v-input
-			:model-value="shiftedColumnsWritable"
-			type="number"
-			:min="0"
-			:max="8"
-			@update:model-value="shiftedColumnsWritable = Math.max(0, Number($event) || 0)"
-		/>
-		<small class="type-note">How many columns, from the first, move in with each level. The last of
-			them gives up the indent, so the columns after it stay in one line. 0 indents only the
-			controls.</small>
-	</div>
 
-	<div
-		v-if="parentFieldWritable"
-		class="field"
-	>
-		<div class="type-label">
-			Folding
+		<div class="field">
+			<div class="type-label">
+				Indented columns
+			</div>
+			<v-input
+				:model-value="shiftedColumnsWritable"
+				type="number"
+				:min="0"
+				:max="8"
+				@update:model-value="shiftedColumnsWritable = Math.max(0, Number($event) || 0)"
+			/>
 		</div>
-		<v-checkbox
-			v-model="showGuidesWritable"
-			block
-			label="Lines down each open item"
-		/>
-		<small class="type-note">Click a chevron to fold or unfold that item. {{ keys.inside }}-click
-			to fold or unfold everything inside it, leaving the item itself as it is: if any of it is
-			open it all folds, otherwise it all unfolds. {{ keys.siblings }}-click to fold or unfold it and
-			its siblings. Hold the key over a chevron to light up the ones that will change. The chevron
-			in the header folds or unfolds every item on the page. Folds are remembered in this
-			browser.</small>
-	</div>
 
-	<div class="field">
-		<div class="type-label">
-			{{ t("layouts.tabular.spacing") }}
+		<div class="field">
+			<div class="type-label">
+				Levels open to start
+			</div>
+			<v-select
+				v-model="openDepthWritable"
+				:items="openDepthItems"
+				show-deselect
+				placeholder="All"
+			/>
+			<v-button
+				class="reset-folds"
+				small
+				secondary
+				@click="resetFolds"
+			>
+				Reset my folds
+			</v-button>
 		</div>
-		<v-select
-			v-model="tableSpacingWritable"
-			:items="[
-				{
-					text: t('layouts.tabular.compact'),
-					value: 'compact',
-				},
-				{
-					text: t('layouts.tabular.cozy'),
-					value: 'cozy',
-				},
-				{
-					text: t('layouts.tabular.comfortable'),
-					value: 'comfortable',
-				},
-			]"
-		/>
-	</div>
+
+		<div class="field">
+			<div class="type-label">
+				Folding
+			</div>
+			<v-checkbox
+				v-model="showGuidesWritable"
+				block
+				label="Lines down each open item"
+			/>
+			<small class="type-note">{{ keys.inside }}-click a chevron for everything inside it,
+				{{ keys.siblings }}-click for it and its siblings.</small>
+		</div>
+	</template>
 </template>
 
 <style lang="scss" scoped>
@@ -191,5 +199,25 @@ const selfReferencingM2oFields = computed(() => {
 
 .v-notice {
 	--v-notice-background-color: var(--theme--background-accent);
+}
+
+.setup {
+	p + ol,
+	ol + p {
+		margin-top: 8px;
+	}
+
+	ol {
+		padding-left: 20px;
+	}
+
+	.done {
+		text-decoration: line-through;
+		opacity: 0.6;
+	}
+}
+
+.reset-folds {
+	margin-top: 8px;
 }
 </style>

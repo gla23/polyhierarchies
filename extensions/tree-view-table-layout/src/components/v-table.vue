@@ -10,7 +10,7 @@ import type {
 	ItemSelectEvent,
 	Sort,
 } from '../core-clones/components/v-table/types';
-import { useEventListener, useLocalStorage } from '@vueuse/core';
+import { useEventListener } from '@vueuse/core';
 import { clone, forEach, pick } from 'lodash';
 import {
 	computed,
@@ -24,6 +24,7 @@ import {
 import Sortable from './sortable/sortable.vue';
 import TableHeader from './table-header.vue';
 import TableRow from './table-row.vue';
+import { useFolds } from '../folds';
 
 const props = withDefaults(
 	defineProps<{
@@ -53,6 +54,8 @@ const props = withDefaults(
 		shiftedColumns?: number;
 		/** The faint lines from an open item's chevron down everything inside it */
 		showGuides?: boolean;
+		/** How many levels start open, below which items start folded; unset, everything starts open */
+		openDepth?: number | null;
 	}>(),
 	{
 		itemKey: 'id',
@@ -76,6 +79,7 @@ const props = withDefaults(
 		clickable: true,
 		shiftedColumns: 1,
 		showGuides: true,
+		openDepth: null,
 	},
 );
 
@@ -408,7 +412,6 @@ const {
 	collapsedKey,
 	collapsedParentsKey,
 	onSortUpdate,
-	onToggleChildren,
 	setAllCollapsed,
 	setCollapsed,
 } = useTreeView({
@@ -577,8 +580,11 @@ function chevronHint(item: Item) {
 
 function onChevronClick(item: Item, event: MouseEvent) {
 	const reach = reachOf(event);
-	if (!reach)
-		return onToggleChildren(item);
+	if (!reach) {
+		if (item[childrenKey]?.length)
+			setCollapsed([item[props.itemKey]], !item[collapsedKey]);
+		return;
+	}
 	const targets = reachFrom(item, reach);
 	if (targets.length)
 		setCollapsed(targets, foldsWith(item, reach, targets));
@@ -614,8 +620,6 @@ function useTreeView({
 		childrenKey,
 		collapsedKey,
 		collapsedParentsKey,
-		onToggleChildren,
-		isCollapsed,
 		initCollapsedChildren,
 		setAllCollapsed,
 		setCollapsed,
@@ -639,7 +643,6 @@ function useTreeView({
 		collapsedKey,
 		collapsedParentsKey,
 		onSortUpdate,
-		onToggleChildren,
 		setAllCollapsed,
 		setCollapsed,
 	};
@@ -664,7 +667,7 @@ function useTreeView({
 			initCollapsedChildren();
 
 			if (orderChanged)
-				onSortUpdate({ sort: true, parent: null });
+				save({ sort: true, parent: null });
 		}
 	}
 
@@ -698,8 +701,10 @@ function useTreeView({
 		for (const item of data) {
 			item[itemParent] = getParentId(item);
 			item[childrenKey] = [];
-			item[collapsedKey] = isCollapsed(item[itemKey.value]);
+			item[collapsedKey] = false;
 			item[collapsedParentsKey] = [];
+			// Worked out afresh, as a drop rebuilds from rows that already have one
+			delete item[itemDepth];
 
 			map[item[itemKey.value]] = item;
 		}
@@ -761,22 +766,25 @@ function useTreeView({
 		const rootItems = items.filter((item) => item[itemDepth] === 0);
 		rootItems.sort(sortBySortKey);
 		rootItems.forEach(addItem);
-		applySortValues();
+		checkSortValues();
 
 		return { sortedResult, orderChanged };
 
-		function applySortValues() {
-			sortedResult = sortedResult.map((item: Item, index) => {
-				const sortValue = index + 1;
-
-				if (item[sortKey.value!] !== sortValue) {
-					item[sortKey.value!] = sortValue;
-					if (!orderChanged)
-						orderChanged = true;
+		/**
+		 * The rows' order only needs the sort values rising down them, not numbering 1, 2, 3, so a
+		 * gap, or a page that starts further on, is no reason to save anything. Only an item with
+		 * none, or out of step with the rows (a branch sorted apart from its parent), needs a move.
+		 */
+		function checkSortValues() {
+			let last = -Infinity;
+			for (const item of sortedResult) {
+				const value = item[sortKey.value!];
+				if (typeof value !== 'number' || value <= last) {
+					orderChanged = true;
+					return;
 				}
-
-				return item;
-			});
+				last = value;
+			}
 		}
 
 		function addItem(item: Item) {
@@ -805,29 +813,26 @@ function useTreeView({
 		parent: null | { id: PrimaryKey; parent: PrimaryKey | null };
 	}
 
+	/** The rows' new order and the dragged item's new parent; the layout works out what to save */
+	function save({ sort, parent }: SortUpdateParams) {
+		emit('update:items', {
+			order: sort ? internalItems.value.map((item) => item[itemKey.value] as PrimaryKey) : null,
+			parent: parentField.value ? parent : null,
+		});
+	}
+
+	/** A drop: save it, then, as the rows are already in place, work out which items hold which */
 	function onSortUpdate({ sort, parent }: SortUpdateParams) {
-		let edits = {};
+		save({ sort, parent });
 
-		if (sort) {
-			for (const item of internalItems.value) {
-				edits[item[props.itemKey]] = {
-					[props.manualSortKey!]: item[props.manualSortKey!],
-				};
-			}
-		}
-
+		// The rows are already in place, but which items hold which (and so the chevrons, guides and
+		// folds) is worked out afresh now, rather than waiting on the reload after the save
 		if (parent && parentField.value) {
-			edits = {
-				...edits,
-				[parent.id]: {
-					...edits[parent.id],
-					[parentField.value]:
-                            parent.parent !== null ? { [itemKey.value]: parent.parent } : null,
-				},
-			};
+			const moved = internalItems.value.find((item) => item[itemKey.value] === parent.id);
+			if (moved)
+				moved[parentField.value] = parent.parent;
 		}
-
-		emit('update:items', edits);
+		initTreeView();
 	}
 
 	function useCollapsible() {
@@ -835,44 +840,49 @@ function useTreeView({
 		const collapsedKey = '--collapsed';
 		const collapsedParentsKey = '--collapsed-parents';
 
-		// Local rather than session storage, so folds last beyond the tab, as the layout's options do
-		const collapsedState = useLocalStorage<PrimaryKey[]>(
-			`${collection.value}--tree-view-collapsed-items`,
-			[],
-		);
-		// Asked once per item on every load, so a set rather than searching the array each time
-		const collapsedSet = computed(() => new Set(collapsedState.value));
+		const { folds } = useFolds(collection.value);
+		// A click here, the sidebar's reset, another tab, or a new starting depth
+		watch([folds, () => props.openDepth], () => {
+			if (treeViewAble.value)
+				initCollapsedChildren();
+		});
 
 		return {
 			childrenKey,
 			collapsedKey,
 			collapsedParentsKey,
-			onToggleChildren,
-			isCollapsed,
 			initCollapsedChildren,
 			setAllCollapsed,
 			setCollapsed,
 		};
 
-		/** Folds or unfolds these items together, then works out afresh which rows that hides */
-		function setCollapsed(ids: PrimaryKey[], fold: boolean) {
-			const targets = new Set(ids);
-			const state = new Set(collapsedState.value);
-			for (const id of targets)
-				fold ? state.add(id) : state.delete(id);
-			collapsedState.value = [...state];
-			for (const item of internalItems.value) {
-				if (targets.has(item[itemKey.value]))
-					item[collapsedKey] = fold;
-				item[collapsedParentsKey] = [];
-			}
-			initCollapsedChildren();
+		/** The item's own fold if you've set one, otherwise the starting depth's */
+		function isCollapsed(item: Item) {
+			return folds.value[item[itemKey.value]] ?? isCollapsedByDepth(item);
 		}
 
-		/** Only this page's items are known, so folding adds to what's stored rather than replacing it */
+		/** Folds or unfolds these items together, storing only where that differs from the starting depth */
+		function setCollapsed(ids: PrimaryKey[], fold: boolean) {
+			const targets = new Set(ids);
+			const next = { ...folds.value };
+			for (const item of internalItems.value) {
+				if (!targets.has(item[itemKey.value]))
+					continue;
+				delete next[item[itemKey.value]];
+				if (isCollapsedByDepth(item) !== fold)
+					next[item[itemKey.value]] = fold;
+			}
+			// The watch on `folds` works out what that hides
+			folds.value = next;
+		}
+
+		/** Levels shallower than `openDepth` start open; none set, everything does */
+		function isCollapsedByDepth(item: Item) {
+			return props.openDepth != null && (item[itemDepth] ?? 0) >= props.openDepth;
+		}
+
+		/** Only this page's items are known, so this leaves other pages' folds as they are */
 		function setAllCollapsed(fold: boolean) {
-			if (!fold)
-				collapsedState.value = [];
 			setCollapsed(
 				internalItems.value
 					.filter((item) => item[childrenKey]?.length)
@@ -881,37 +891,17 @@ function useTreeView({
 			);
 		}
 
-		function isCollapsed(id: PrimaryKey) {
-			return collapsedSet.value.has(id);
-		}
-
-		function onToggleChildren(item: Item) {
-			if (!item[childrenKey]?.length)
-				return;
-
-			item[collapsedKey] = toggleItem(item[itemKey.value]);
-			collapseChildren(item[itemKey.value], item[childrenKey]);
-		}
-
-		function toggleItem(id: PrimaryKey): boolean {
-			const index = collapsedState.value.indexOf(id);
-
-			if (index !== -1) {
-				collapsedState.value.splice(index, 1);
-				return false;
-			}
-
-			collapsedState.value.push(id);
-			return true;
-		}
-
+		/** Works out afresh which items are folded and which rows that hides */
 		function initCollapsedChildren() {
 			const byId = new Map(internalItems.value.map((item) => [item[itemKey.value], item]));
-			collapsedState.value.forEach((collapsedId: PrimaryKey) => {
-				const childrenIds = byId.get(collapsedId)?.[childrenKey];
-				if (childrenIds)
-					collapseChildren(collapsedId, childrenIds, byId);
-			});
+			for (const item of internalItems.value) {
+				item[collapsedKey] = !!item[childrenKey]?.length && isCollapsed(item);
+				item[collapsedParentsKey] = [];
+			}
+			for (const item of internalItems.value) {
+				if (item[collapsedKey])
+					collapseChildren(item[itemKey.value], item[childrenKey], byId);
+			}
 		}
 
 		function collapseChildren(
@@ -1271,8 +1261,9 @@ table.reshaping :deep(th) {
  */
 table.animate-folds :deep(.table-row) {
 	/* Unfolding drops the folded row's own clip at once, so it would spill over the rows below. The
-	   top is left open for the tree guides' corners, which reach up into the row above. */
-	clip-path: inset(-6px 0 0 0);
+	   top is left open for the tree guides' corners, which reach up into the row above, and the
+	   bottom by a border for the last row's curve onto the table's border. */
+	clip-path: inset(-6px 0 calc(-1 * var(--theme--border-width)) 0);
 	transition:
 		height 150ms cubic-bezier(0.2, 0, 0, 1),
 		opacity 150ms ease-out,

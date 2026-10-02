@@ -1,12 +1,13 @@
 <!-- eslint-disable perfectionist/sort-named-imports -->
 <script setup lang="ts">
 import type { ShowSelect } from '@directus/extensions';
-import type { Field, Filter, Item, PrimaryKey } from '@directus/types';
+import type { Field, Filter, Item } from '@directus/types';
 import type { ComponentPublicInstance, Ref } from 'vue';
 // CORE CLONES
 import type { HeaderRaw } from './core-clones/components/v-table/types';
 import type { AliasFields } from './core-clones/composables/use-alias-fields';
 import type { Collection } from './core-clones/types/collections';
+import type { TreeEdits } from './types';
 // CORE CHANGES
 // import { useSync } from '@directus/composables';
 // import { useCollectionPermissions } from '@/composables/use-permissions';
@@ -71,6 +72,7 @@ interface Props {
 	info?: Collection;
 	sortField?: string;
 	resetPresetAndRefresh: () => Promise<void>;
+	clearFilters?: () => void;
 	selectAll: () => void;
 	filterUser?: Filter;
 	search?: string;
@@ -81,7 +83,8 @@ interface Props {
 	parentField: string | null;
 	shiftedColumns: number;
 	showGuides: boolean;
-	saveEdits: (edits: Record<PrimaryKey, Item>) => void;
+	openDepth: number | null;
+	saveEdits: (edits: TreeEdits) => void;
 	isFiltered: boolean;
 }
 
@@ -103,13 +106,15 @@ const hierarchyHint = computed(() => {
 	if (!props.parentField || !props.sortField || !sortAllowed.value)
 		return null;
 	if (props.isFiltered)
-		return 'The hierarchy is hidden while searching or filtering, as that can leave items without their parents.';
+		return "The hierarchy can't be displayed while searching or filtering.";
 	if (props.tableSort?.by !== props.sortField)
-		return 'You are sorting by another column. Swap view to see the hierarchy and drag items into place.';
+		return "You are sorting by another column, so the hierarchy is hidden and items can't be dragged into place.";
 	return null;
 });
 
 function showHierarchy() {
+	if (props.isFiltered)
+		props.clearFilters?.();
 	if (props.sortField)
 		props.onSortChange({ by: props.sortField, desc: false });
 }
@@ -132,14 +137,6 @@ function useCollectionPermissions(collection: Ref<string>) {
 	});
 
 	return { sortAllowed };
-	return {
-		sortAllowed: computed(() => {
-			if (!props.sortField)
-				return false;
-			return true
-			return permissionsStore.hasPermission(collection.value, 'sort');
-		}),
-	};
 }
 
 const selectionWritable = useSync(props, 'selection', emit);
@@ -203,11 +200,11 @@ function removeField(fieldKey: string) {
 			<div class="hint-body">
 				<span>{{ hierarchyHint }}</span>
 				<v-button
-					v-if="!isFiltered"
+					v-if="!isFiltered || clearFilters"
 					small
 					@click="showHierarchy"
 				>
-					Swap view
+					View hierarchy
 				</v-button>
 			</div>
 		</v-notice>
@@ -234,6 +231,7 @@ function removeField(fieldKey: string) {
 			:collection
 			:shifted-columns="shiftedColumns"
 			:show-guides="showGuides"
+			:open-depth="openDepth"
 			@click:row="onRowClick"
 			@update:sort="onSortChange"
 			@update:items="saveEdits"

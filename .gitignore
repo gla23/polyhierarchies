@@ -1,3 +1,4 @@
+local-setup
 node_modules
 dist
 .DS_Store

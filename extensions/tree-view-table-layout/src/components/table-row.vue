@@ -305,10 +305,11 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 	bottom: -1px;
 }
 
-/* At the foot of the table, round the bottom of the last row, closing the item's contents off */
+/* At the foot of the table, round the bottom of the last row onto the table's own bottom border,
+   which sits below the row, closing the item's contents off */
 .guide.end {
 	top: 0;
-	bottom: 0;
+	bottom: calc(-1 * var(--theme--border-width));
 	width: 12px;
 	border-bottom: var(--theme--border-width) solid var(--theme--border-color-subdued);
 	border-bottom-left-radius: 6px;

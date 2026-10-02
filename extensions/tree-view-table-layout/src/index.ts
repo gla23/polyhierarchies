@@ -1,7 +1,7 @@
 import type { Field, Filter, Item, PrimaryKey } from '@directus/types';
 import type { ComputedRef, Ref } from 'vue';
 import type { HeaderRaw, Sort } from './core-clones/components/v-table/types';
-import type { LayoutOptions, LayoutQuery } from './types';
+import type { LayoutOptions, LayoutQuery, TreeEdits } from './types';
 import {
 	defineLayout,
 	useApi,
@@ -36,6 +36,7 @@ import { saveAsCSV } from './core-clones/utils/save-as-csv';
 import { syncRefProperty } from './core-clones/utils/sync-ref-property';
 import Layout from './layout.vue';
 import Options from './options.vue';
+import { planSortMoves } from './sort-plan';
 
 export default defineLayout<LayoutOptions, LayoutQuery>({
 	id: 'directus-labs-tree-view-table-layout',
@@ -91,6 +92,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 
 		const shiftedColumns = syncRefProperty(layoutOptions, 'shiftedColumns', 1);
 		const showGuides = syncRefProperty(layoutOptions, 'showGuides', true);
+		const openDepth = syncRefProperty(layoutOptions, 'openDepth', null);
 
 		const { onClick } = useLayoutClickHandler({
 			props,
@@ -145,11 +147,11 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 
 		const { isFiltered } = useFilteringTreeView({ filterUser, search });
 
-		const { saveEdits } = useSaveEdits();
+		const { saveEdits, shownItems } = useSaveEdits();
 
 		return {
 			tableHeaders,
-			items,
+			items: shownItems,
 			loading,
 			error,
 			totalPages,
@@ -170,6 +172,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			parentField,
 			shiftedColumns,
 			showGuides,
+			openDepth,
 			primaryKeyField,
 			info,
 			showingCount,
@@ -177,6 +180,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			hideDragImage,
 			refresh,
 			resetPresetAndRefresh,
+			clearFilters: props.clearFilters,
 			selectAll,
 			filter,
 			search,
@@ -469,7 +473,8 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			const parentField = syncRefProperty(layoutOptions, 'parent', null);
 
 			const fieldsToQuery = computed(() => {
-				const fieldsToQuery = fieldsWithRelationalAliased.value;
+				// A copy, or the pushes below would grow the relational fields list itself
+				const fieldsToQuery = [...fieldsWithRelationalAliased.value];
 				addSortField();
 				addParentField();
 
@@ -546,22 +551,84 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			const api = useApi();
 			const { unexpectedError } = useUnexpectedError();
 
-			return { saveEdits };
+			// Saves queue behind one another, as each plans its moves from the sort values the last left
+			let queue = Promise.resolve();
+			let pending = 0;
+			let changed = false;
+			// The table keeps its own order while any are pending: a reload landing between two drags
+			// would put the second back where it was, until its own save reloaded it a moment later
+			const shownItems = ref(items.value);
+			watch(items, (loaded) => {
+				if (!pending)
+					shownItems.value = loaded;
+			});
 
-			async function saveEdits(edits: Record<PrimaryKey, Item>) {
+			return { saveEdits, shownItems };
+
+			function saveEdits(edits: TreeEdits) {
+				pending++;
+				queue = queue.then(() => save(edits)).finally(() => {
+					// Only when something changed, or a load that finds the order out of step and can't fix
+					// it would load again and again
+					if (--pending)
+						return;
+					if (changed)
+						refresh();
+					else shownItems.value = items.value;
+					changed = false;
+				});
+			}
+
+			/**
+			 * Saves as little as possible. A new parent is a real edit, so a PATCH, but a new order goes
+			 * through `/utils/sort`, as Directus's own table does: it only shifts the sort values between
+			 * where an item was and where it went, and leaves `date_updated`, revisions and flows alone.
+			 */
+			async function save({ order, parent }: TreeEdits) {
 				try {
-					for (const [id, payload] of Object.entries(edits)) {
-						await api.patch(
-							`${getEndpoint(collection.value!)}/${id}`,
-							payload,
-						);
+					if (parent && parentField.value) {
+						await api.patch(`${getEndpoint(collection.value!)}/${parent.id}`, {
+							[parentField.value]: parent.parent,
+						});
+						changed = true;
 					}
+					if (order && await saveOrder(order))
+						changed = true;
 				}
 				catch (error: any) {
 					unexpectedError(error);
+					changed = true;
+				}
+			}
+
+			async function saveOrder(order: PrimaryKey[]) {
+				const pk = primaryKeyField.value?.field;
+				const sort = sortField.value;
+				if (!pk || !sort)
+					return false;
+
+				let rows = await getSortValues(pk, sort);
+				const values = rows.map((row) => row[sort]);
+				// `/utils/sort` numbers any items without a value and renumbers the lot if two share one
+				// before it moves anything, so a move of an item to its own place does just that, and the
+				// plan below can then trust the values
+				if (values.includes(null) || new Set(values).size !== values.length) {
+					await api.post(`/utils/sort/${collection.value}`, { item: rows[0]![pk], to: rows[0]![pk] });
+					rows = await getSortValues(pk, sort);
 				}
 
-				refresh();
+				const moves = planSortMoves(rows.map((row) => row[pk]), order);
+				for (const move of moves)
+					await api.post(`/utils/sort/${collection.value}`, move);
+				return moves.length > 0;
+			}
+
+			/** Fresh from the server rather than the loaded items, which the table has already reordered */
+			async function getSortValues(pk: string, sort: string): Promise<Item[]> {
+				const response = await api.get(getEndpoint(collection.value!), {
+					params: { fields: [pk, sort], sort: [sort, pk], limit: -1 },
+				});
+				return response.data.data;
 			}
 
 			// Based from the core: /app/src/utils/unexpected-error.ts

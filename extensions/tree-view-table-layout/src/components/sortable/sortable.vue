@@ -46,6 +46,8 @@ function useSortable({
 	const draggedChildrenIds = computed<ItemID[]>(
 		() => draggedChildren.value?.map((item) => item[itemKey]) ?? [],
 	);
+	// Asked by every row on every render while dragging
+	const draggedChildrenSet = computed(() => new Set(draggedChildrenIds.value));
 
 	const draggedChildrenCount = computed(
 		() => draggedChildren.value?.length ?? 0,
@@ -74,7 +76,7 @@ function useSortable({
 		return (
 			item[itemDepth]
 			+ (item[itemKey] === draggedItemId.value
-				|| draggedChildrenIds.value?.includes(item[itemKey])
+				|| draggedChildrenSet.value.has(item[itemKey])
 				? draggedItemDepthOffset.value
 				: 0)
 		);
@@ -84,23 +86,20 @@ function useSortable({
 		if (!draggedItemId.value || !nestable.value)
 			return [];
 
+		// Built once: filtering every item at each level was quadratic in a deep branch
+		const childrenOf = new Map<ItemID, Item[]>();
+		for (const item of items.value) {
+			const siblings = childrenOf.get(item[itemParent!]);
+			if (siblings)
+				siblings.push(item);
+			else childrenOf.set(item[itemParent!], [item]);
+		}
+
 		return getChildren(draggedItemId.value);
 
-		function getChildren(id: ItemID) {
-			const children = items.value.filter(
-				(item) => item[itemParent!] === id,
-			);
-
-			let allChildren = [...children];
-
-			for (const child of children) {
-				allChildren = [
-					...allChildren,
-					...getChildren(child[itemKey]),
-				];
-			}
-
-			return allChildren;
+		function getChildren(id: ItemID): Item[] {
+			const children = childrenOf.get(id) ?? [];
+			return [...children, ...children.flatMap((child) => getChildren(child[itemKey]))];
 		}
 	}
 
