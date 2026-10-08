@@ -487,7 +487,10 @@ const guideJoins = computed(() => {
 			.map((guide) => guide.level);
 		ended = levels.length ? { id: item[props.itemKey], levels } : null;
 	}
-	return { continuing, cornersBelow, insets };
+	// The last row's guides curve onto the table's bottom border, so it starts where the outermost
+	// one ends, as a divider does: its column's middle (level * 28 + 14) plus the curve's reach (12)
+	const footInset = ended ? `${Math.min(...ended.levels) * 28 + 26}px` : null;
+	return { continuing, cornersBelow, insets, footInset };
 });
 
 const foldableItems = computed(() => internalItems.value.filter((item) => item[childrenKey]?.length));
@@ -941,7 +944,9 @@ function useTreeView({
 				'shifted': shiftedCount > 0,
 				reshaping,
 				'animate-folds': internalItems.length <= 300,
+				'foot-inset': guideJoins.footInset,
 			}"
+			:style="guideJoins.footInset ? { '--foot-inset': guideJoins.footInset } : null"
 		>
 			<TableHeader
 				v-model:headers="internalHeaders"
@@ -1243,6 +1248,15 @@ table :deep(.sortable-ghost .cell) {
 
 table {
 	border-bottom: var(--theme--border-width) solid var(--theme--border-color-subdued);
+}
+
+table.foot-inset {
+	border-bottom-color: transparent;
+	background-image: linear-gradient(var(--theme--border-color-subdued), var(--theme--border-color-subdued));
+	background-repeat: no-repeat;
+	background-position: var(--foot-inset) 100%;
+	background-size: calc(100% - var(--foot-inset)) var(--theme--border-width);
+	background-origin: border-box;
 }
 
 table.reshaping :deep(tr) {

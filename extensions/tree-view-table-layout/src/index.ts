@@ -139,7 +139,8 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			return formatItemsCountPaginated({
 				currentItems: itemCount.value,
 				currentPage: page.value,
-				perPage: 25, // limit.value,
+				// -1 is Directus's "no limit": everything is on one page
+				perPage: limit.value > 0 ? limit.value : itemCount.value,
 				isFiltered: !!filterUser.value,
 				totalItems: totalCount.value,
 			});
