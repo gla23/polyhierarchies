@@ -4,6 +4,7 @@ import { CassetteButtons, NodeEditor, PathList } from '@polyhierarchies/ui';
 import { computed, reactive, ref, watch, watchEffect } from 'vue';
 import EveryPath from './pages/EveryPath.vue';
 import PrimaryParents from './pages/PrimaryParents.vue';
+import PriorArt from './pages/PriorArt.vue';
 import { current, editorFor, isEdited, reset } from './store';
 import { uis, type OptionDef } from './uis';
 
@@ -25,6 +26,7 @@ function store(key: string, value: unknown) {
 
 const pages = [
 	{ value: 'explore', label: 'Explore' },
+	{ value: 'prior-art', label: 'Prior art' },
 	{ value: 'every-path', label: 'Every path' },
 	{ value: 'primary-parents', label: 'Primary parents?' }
 ] as const;
@@ -165,6 +167,19 @@ const stats = computed(() => {
 					/>
 				</div>
 				<div class="control">
+					<span>Mode</span>
+					<CassetteButtons
+						v-model="mode"
+						label="Mode"
+						:options="[
+							{ value: 'view', label: 'Read only' },
+							{ value: 'edit', label: 'Editable' }
+						]"
+					/>
+				</div>
+				<!-- The two long ones on lines of their own, so neither wraps beside the other -->
+				<span class="line-break" />
+				<div class="control">
 					<span>Data</span>
 					<CassetteButtons
 						v-model="datasetId"
@@ -176,19 +191,6 @@ const stats = computed(() => {
 								title: data.name
 							}))
 						"
-					/>
-				</div>
-				<!-- Mode and reset are about the data, not the view: their own line -->
-				<span class="line-break" />
-				<div class="control">
-					<span>Mode</span>
-					<CassetteButtons
-						v-model="mode"
-						label="Mode"
-						:options="[
-							{ value: 'view', label: 'Read only' },
-							{ value: 'edit', label: 'Editable' }
-						]"
 					/>
 				</div>
 				<button
@@ -208,6 +210,9 @@ const stats = computed(() => {
 		</div>
 		<div v-else-if="page === 'every-path'" class="reading">
 			<EveryPath />
+		</div>
+		<div v-else-if="page === 'prior-art'" class="reading">
+			<PriorArt />
 		</div>
 
 		<main v-else>
@@ -364,18 +369,16 @@ h1 {
 .controls {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 12px 24px;
-	padding: 12px 24px;
+	align-items: center;
+	gap: 8px 24px;
+	padding: 8px 24px;
 }
 
+/* Labels beside their buttons rather than above, a line each saved */
 .control {
 	display: flex;
-	flex-direction: column;
-	gap: 4px;
-}
-
-.controls {
-	align-items: flex-end;
+	align-items: center;
+	gap: 8px;
 }
 
 .line-break {
@@ -384,7 +387,6 @@ h1 {
 }
 
 .reset {
-	margin-bottom: 4px;
 	padding: 6px 12px;
 	font: inherit;
 	color: var(--theme--foreground-subdued);
@@ -446,7 +448,9 @@ h1 {
 	border-radius: var(--theme--border-radius);
 }
 
+/* One width, so the UI and Data buttons start in line */
 .control > span {
+	min-width: 32px;
 	font-size: 12px;
 	color: var(--theme--foreground-subdued);
 }

@@ -10,6 +10,7 @@ export { default as MillerColumns } from './components/miller/MillerColumns.vue'
 export { default as Plex } from './components/plex/Plex.vue';
 export { default as LayeredDag } from './components/layered/LayeredDag.vue';
 export { default as ForceGraph } from './components/force/ForceGraph.vue';
+export { default as NetworkGraph } from './components/force/NetworkGraph.vue';
 export { default as FacetedView } from './components/faceted/FacetedView.vue';
 export { animates, densityStyles, type Density, type GraphEditor, type Motion } from './editing';
 export { iconRendererKey } from './icons';

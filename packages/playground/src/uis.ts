@@ -3,6 +3,7 @@ import {
 	ForceGraph,
 	LayeredDag,
 	MillerColumns,
+	NetworkGraph,
 	OutlineTree,
 	Plex,
 	TreeTable
@@ -245,6 +246,49 @@ export const uis: UiEntry[] = [
 				...motion,
 				about:
 					'Auto lets the layout settle live up to 500 nodes; past that it settles before drawing and then holds still, as repainting every line each frame would stutter.'
+			}
+		]
+	},
+	{
+		id: 'network',
+		name: 'Network graph',
+		component: NetworkGraph,
+		about: [
+			"Obsidian's graph view. The same simulation as the force graph with the hierarchy taken out: no layers, no arrows, parents and children and jumps all just links, so nodes settle wherever their connections pull them. What it shows is clusters — which nodes live close together — rather than what's above what.",
+			"Each dot is sized by how many links it has, so hubs stand out, and names fade in as you zoom, so the whole graph reads as a shape before it reads as words. Hover a node to light it and its neighbours. The local scope is Obsidian's local graph: the focus and whatever is within a few links of it, re-drawn as the focus moves."
+		],
+		editing:
+			'Double-click empty space to add a node there; double-click a node to edit it. Shift-drag from one node to another to make the first a parent of the second.',
+		options: [
+			{
+				...density,
+				about: 'Here it sets how long the links are, so how spread out the graph is.'
+			},
+			{
+				...motion,
+				about:
+					'Auto lets the layout settle live up to 500 nodes; past that it settles before drawing and then holds still.'
+			},
+			{
+				key: 'scope',
+				label: 'Scope',
+				type: 'choice',
+				default: 'all',
+				choices: [
+					{ value: 'all', label: 'Whole graph' },
+					{ value: 'local', label: 'Around the focus' }
+				],
+				about:
+					"Obsidian's two graphs: the global one, everything at once, or the local one, only what's within the depth below of the focus."
+			},
+			{
+				key: 'depth',
+				label: 'Local depth',
+				type: 'number',
+				default: 2,
+				min: 1,
+				max: 5,
+				about: 'How many links out from the focus the local scope reaches, in any direction.'
 			}
 		]
 	},

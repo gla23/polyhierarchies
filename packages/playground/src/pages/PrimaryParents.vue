@@ -84,7 +84,7 @@
 		<ul>
 			<li>
 				<strong>Workflowy</strong>'s
-				<a href="https://workflowy.com/feature/mirrors/">mirrors</a> put the same item in several
+				<a href="https://blog.workflowy.com/mirrors-create-live-copies-of-any-bullet/">mirrors</a> put the same item in several
 				places, every copy live and identical, with a small mark saying it lives elsewhere. The
 				Outline's <em>Mirrors</em> option draws placements that way.
 			</li>
