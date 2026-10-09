@@ -200,7 +200,7 @@ function swap() {
 const ready = computed(() =>
 	props.hierarchy === 'polyhierarchy'
 		? !!(props.junction && props.junctionParent && props.junctionChild)
-		: !!(props.sortField && props.parentField),
+		: !!props.parentField,
 );
 </script>
 
@@ -229,18 +229,19 @@ const ready = computed(() =>
 			</div>
 
 			<v-notice
-				v-if="!sortField || !selfReferencingM2oFields?.length"
+				v-if="!selfReferencingM2oFields?.length"
 				type="info"
 				class="setup"
 			>
 				<div>
-					<p>This layout nests each item under its parent. It needs two fields, set up in this collection's data model settings:</p>
+					<p>This layout nests each item under its parent. Set these up in this collection's data model settings:</p>
 					<ol>
-						<li :class="{ done: sortField }">
-							A sort field: an integer field, chosen as the collection's sort field
+						<li>
+							<span :class="{ done: selfReferencingM2oFields?.length }">A parent field: a many-to-one field that relates to this same collection</span>
 						</li>
-						<li :class="{ done: selfReferencingM2oFields?.length }">
-							A parent field: a many-to-one field that relates to this same collection
+						<li>
+							<span v-if="sortField">✅ </span>
+							<span :class="{ done: sortField }">Optionally, a sort field: an integer field, chosen as the collection's sort field, so rows can be dragged into place</span>
 						</li>
 					</ol>
 					<p>Then choose the parent field here.</p>
@@ -260,7 +261,18 @@ const ready = computed(() =>
 				<small
 					v-if="!parentFieldWritable"
 					class="type-note"
-				>The field that holds each item's parent. Choosing one can rewrite your items' sort values.</small>
+				>The field that holds each item's parent.<template v-if="sortField"> Choosing one can rewrite your items' sort values.</template></small>
+
+				<v-notice
+					v-if="!sortField"
+					type="warning"
+					class="setup"
+				>
+					<div>
+						<p>This collection has no sort field, so the tree can't be dragged: rows can't be reordered, or moved to another parent by dropping them. A selected row can still be given a new parent from its actions.</p>
+						<p>To drag rows into place, add an integer field and choose it as the collection's sort field in its data model settings.</p>
+					</div>
+				</v-notice>
 			</template>
 		</div>
 

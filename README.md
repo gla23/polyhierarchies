@@ -39,6 +39,7 @@ is a different model, explored on the playground's _Primary parents?_ page rathe
 bun install
 bun run dev        # the playground
 bun run build      # every package and extension
+bun run test       # the model, the tree rule and the sort planner, from each package's test/
 ```
 
 ## Technical notes

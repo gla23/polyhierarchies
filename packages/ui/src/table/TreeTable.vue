@@ -1116,7 +1116,8 @@ const allFolded = computed(
 /**
  * ⌘/Ctrl-clicking a chevron folds or unfolds everything inside the item, leaving the item itself as
  * it is: folding it too would hide what the click did. Any of them open, they all fold; all folded,
- * they all unfold. ⌥/Alt-clicking folds or unfolds the item and its siblings, all the way the
+ * they all unfold. On a folded item it opens the item and everything inside, as the change would
+ * otherwise happen out of sight. ⌥/Alt-clicking folds or unfolds the item and its siblings, all the way the
  * clicked one goes. While the key is held over a chevron, the ones that will change are lit.
  */
 type FoldReach = 'inside' | 'siblings';
@@ -1243,7 +1244,7 @@ const foldAllTip = computed(() => {
 
 /** Which way a click goes: the item's own way, or for everything inside, fold unless all are */
 function foldsWith(item: Item, reach: FoldReach | null, targets: PrimaryKey[]) {
-	if (reach !== 'inside')
+	if (reach !== 'inside' || isFolded(item))
 		return !isFolded(item);
 	return targets.some((id) => {
 		const row = rowsByKey.value.get(String(id));
@@ -1263,6 +1264,8 @@ function chevronHint(item: Item) {
 	const reach = item[rowKey] === hoveredChevron.value ? reachHeld.value : null;
 	if (reach === 'inside') {
 		const targets = [...foldTargets.value];
+		if (isFolded(item))
+			return targets.length ? 'Unfold this and everything inside' : 'Unfold';
 		if (!targets.length)
 			return 'Nothing inside to fold';
 		return `${foldsWith(item, reach, targets) ? 'Fold' : 'Unfold'} everything inside`;
@@ -1294,6 +1297,8 @@ function onChevronClick(item: Item, event: MouseEvent) {
 		return;
 	}
 	const targets = reachFrom(item, reach);
+	if (reach === 'inside' && isFolded(item))
+		return setCollapsed([item[rowKey], ...targets], false);
 	if (targets.length)
 		setCollapsed(targets, foldsWith(item, reach, targets));
 }
@@ -1370,7 +1375,9 @@ function useTreeView({
 			return;
 		}
 		internalItems.value = placementRows();
-		if (!props.manualOrder && sortValuesOutOfStep())
+		// Read only, the order is the items' as they came (a column's, or with no sort field the keys'),
+		// and renumbering the sort values to match would rewrite the hierarchy's own order
+		if (!props.manualOrder && !props.readonly && sortKey.value && sortValuesOutOfStep())
 			save({ sort: true, parent: null });
 	}
 

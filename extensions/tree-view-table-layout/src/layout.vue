@@ -100,7 +100,7 @@ interface Props {
 	matches: Set<string> | null;
 	/** Sorted by a column rather than by the hierarchy: siblings in that order, nothing to drag */
 	columnSorted: boolean;
-	/** Nested, but not draggable: while searching, or sorted by a column */
+	/** Nested, but not draggable: sorted by a column, or a taxonomy with no sort field */
 	treeReadonly: boolean;
 	/** How highlights show, from the search's or the filter's mode */
 	highlightMode: 'routes' | 'inplace';
@@ -172,16 +172,17 @@ const system = inject<Record<string, any>>('system')!;
 const { sortAllowed, linksEditable } = useCollectionPermissions(collection);
 
 /**
- * Why rows can't be dragged right now. The tree stays while searching (the matches are highlighted
- * in it) and while sorted by a column (siblings come in that order), but a drag would have nowhere
- * sensible to put a row, so it waits for the hierarchy's own order.
+ * Why the drag handles went: sorted by a column, siblings come in that order, and a drag would have
+ * nowhere sensible to put a row. Only said where rows could be dragged in the hierarchy's own order;
+ * where they never could, a column sort is just a sort, and the header already shows it.
  */
 const hierarchyHint = computed(() => {
-	if (!props.graph || props.isFiltered)
+	if (!props.graph || props.isFiltered || !props.columnSorted)
 		return null;
-	if (props.columnSorted)
-		return 'Sorted by a column: siblings are in that order, and rows can\'t be dragged into place until it\'s sorted by the hierarchy again.';
-	return null;
+	const draggable = props.hierarchy === 'polyhierarchy' ? linksEditable.value : sortAllowed.value;
+	return draggable
+		? 'Items are in the order of the column you sorted by. To drag them into place, sort by the hierarchy again.'
+		: null;
 });
 
 function showHierarchy() {

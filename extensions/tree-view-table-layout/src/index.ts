@@ -257,8 +257,9 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			matches,
 			treeActive,
 			columnSorted,
-			// Searching, the tree can still be edited: a drop lands after the row it's dropped on
-			treeReadonly: computed(() => treeActive.value && columnSorted.value),
+			// Searching, the tree can still be edited: a drop lands after the row it's dropped on. A taxonomy
+			// with no sort field has nowhere to keep an order, so it nests without dragging
+			treeReadonly: computed(() => treeActive.value && (columnSorted.value || (!linksActive.value && !sortField.value))),
 			searchMode,
 			filterMode,
 			modeMenus,
