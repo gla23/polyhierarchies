@@ -1667,6 +1667,8 @@ function useTreeView({
 					v-model:depth-change-max="depthChangeMax"
 					:item-key="rowKey"
 					:shown="drawnOnly"
+					:root="animated ? tableRoot : null"
+					:hidden="rowHidden"
 					:item-sort="manualSortKey ?? ''"
 					:item-depth
 					:item-parent="graph ? itemParent : null"

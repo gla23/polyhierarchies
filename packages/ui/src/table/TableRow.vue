@@ -608,6 +608,12 @@ function usePreventClickAfterDragging({
 		--v-icon-color: var(--theme--primary);
 	}
 
+	/* Held, it stays on top of the rows sliding out of its way */
+	&.sorting {
+		position: relative;
+		z-index: 1;
+	}
+
 	&.collapsed {
 		visibility: hidden;
 		height: 0;

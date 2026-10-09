@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ModelRef, Ref } from 'vue';
-import { computed, provide, ref } from 'vue';
+import { computed, nextTick, provide, ref } from 'vue';
 
     type Item = Record<string, any>;
     type ItemID = string | number;
@@ -14,7 +14,7 @@ interface SortUpdateParams {
 	link: boolean;
 }
 
-const { itemKey, itemSort, itemDepth, itemParent, snapStep, disabled, shown } =
+const { itemKey, itemSort, itemDepth, itemParent, snapStep, disabled, shown, hidden, root } =
         defineProps<{
         	itemKey: string;
         	itemSort: string;
@@ -24,6 +24,10 @@ const { itemKey, itemSort, itemDepth, itemParent, snapStep, disabled, shown } =
         	disabled?: boolean;
         	/** Which rows to draw; all, if not given. The rest stay in `items`, and move with a drag */
         	shown?: (item: Item) => boolean;
+        	/** Folded away: moved down past a folded row, a row lands after what it holds, not in it */
+        	hidden?: (item: Item) => boolean;
+        	/** Where the rows are drawn, to slide those a drag pushes aside; without it they jump */
+        	root?: HTMLElement | null;
         }>();
 
 /** Drawn rows only: thousands of hidden ones cost a render each for nothing */
@@ -71,6 +75,8 @@ function useSortable({
 	);
 
 	const draggedItemDepthOffset = ref(0);
+	/** Each sliding row's end, put off when a new move starts it sliding again */
+	const settling = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
 	const initialX = ref(0);
 	const intendedDepthChange = ref(0);
 
@@ -223,7 +229,7 @@ function useSortable({
 
 		targetItemId.value = id;
 
-		moveItem(draggingIndex, dragOverIndex);
+		slideRows(() => moveItem(draggingIndex, dragOverIndex));
 
 		function moveItem(draggingIndex: number, dragOverIndex: number) {
 			const itemsToMove = items.value.splice(
@@ -231,11 +237,60 @@ function useSortable({
 				1 + draggedChildrenCount.value,
 			);
 
-			// Going down it lands just after the row, which moved up by as many rows as it took out:
-			// at the row's old index it would land that many rows further, folded ones and all
-			const to = dragOverIndex > draggingIndex ? dragOverIndex - itemsToMove.length + 1 : dragOverIndex;
+			// Going down it lands just after the row, which moved up by as many rows as it took out (at
+			// the row's old index it would land that many rows further), and after whatever's folded
+			// away in it: just inside, the row below would be one of those, as deep, and it'd nest
+			let to = dragOverIndex;
+			if (dragOverIndex > draggingIndex) {
+				to = dragOverIndex - itemsToMove.length + 1;
+				while (hidden && to < items.value.length && hidden(items.value[to]!))
+					to++;
+			}
 			items.value.splice(to, 0, ...itemsToMove);
 		}
+	}
+
+	/**
+	 * Slides the rows a move pushes aside from where they were to where they land (FLIP, a transform
+	 * only); the dragged rows stay under the pointer. A row on its way can't be hovered: passing under
+	 * a pointer held still, it would be taken for a new place to move to, and moved back.
+	 */
+	function slideRows(move: () => void) {
+		const drawnRows = () => [...(root?.querySelectorAll<HTMLElement>('.table-row[data-key]') ?? [])];
+		const before = drawnRows();
+		if (!before.length || matchMedia('(prefers-reduced-motion: reduce)').matches)
+			return move();
+		// Where each shows now, partway along an earlier slide included, so a new one carries on from it
+		const was = new Map(before.map((row) => [row.dataset.key!, row.getBoundingClientRect().top]));
+		move();
+		void nextTick(() => {
+			const moved = drawnRows().flatMap((row) => {
+				const key = row.dataset.key!;
+				const from = was.get(key);
+				if (from === undefined || key === String(draggedItemId.value) || draggedChildrenSet.value.has(key))
+					return [];
+				const by = from - row.getBoundingClientRect().top;
+				return Math.abs(by) < 1 ? [] : [{ row, by }];
+			});
+			if (!moved.length)
+				return;
+			// Every start, one reflow, then every end: not a reflow per row
+			for (const { row, by } of moved) {
+				row.style.transition = 'none';
+				row.style.transform = `translateY(${by}px)`;
+				row.style.pointerEvents = 'none';
+			}
+			void moved[0]!.row.offsetHeight;
+			for (const { row } of moved) {
+				row.style.transition = 'transform 150ms cubic-bezier(0.2, 0, 0, 1)';
+				row.style.transform = '';
+				clearTimeout(settling.get(row));
+				settling.set(row, setTimeout(() => {
+					row.style.transition = '';
+					row.style.pointerEvents = '';
+				}, 160));
+			}
+		});
 	}
 
 	function onSortEnd(event?: MouseEvent) {

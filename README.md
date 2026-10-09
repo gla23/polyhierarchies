@@ -75,9 +75,9 @@ A few traps found the hard way, each also commented where it bit:
   focuses its `<table>` for the keyboard. Directus's menus are too, which takes no opacity, so a
   dimmed row dims what's inside a display's menu instead.
 - **A row moved in the page is new to the browser.** Vue moves a row by taking it out and putting it
-  back, which replays `@starting-style`: a dragged row grew from nothing at every step, shifting the
-  rows under a pointer held still, which the drag took for more moves. Only rows for items new to
-  the page grow in.
+  back, which replays `@starting-style`, so mid-drag every moved row grew from nothing again. Only
+  rows for items new to the page grow in. The rows a drag pushes aside slide instead, and can't be
+  hovered on the way: one passing under a pointer held still would be taken for a place to drop.
 - **Firefox sometimes gets a Directus response without data**, after which Directus leaves its
   items undefined (and logs its own TypeError from `useItems().getTotalCount`). The layout treats
   missing items as none.
