@@ -189,7 +189,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 		entries: [
 			{
 				name: 'QuickGO',
-				concepts: ['looking-up'],
+				concepts: ['looking-up', 'every-path'],
 				href: 'https://www.ebi.ac.uk/QuickGO/term/GO:0005741',
 				summary: 'One term at a time, with a chart of everything above it.',
 				points: [
@@ -282,7 +282,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'MeSH Browser',
-				concepts: ['placements'],
+				concepts: ['placements', 'every-path'],
 				href: 'https://meshb.nlm.nih.gov/record/ui?ui=D011024',
 				summary: 'The US National Library of Medicine\'s subject headings, used to index every paper in PubMed.',
 				points: [
@@ -365,7 +365,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'SNOMED CT browser',
-				concepts: ['primary-parents'],
+				concepts: ['primary-parents', 'worked-out'],
 				href: 'https://snomedbrowser.org/?perspective=full&conceptId1=75570004&languages=en',
 				summary: 'The official browser for SNOMED CT, the clinical terminology behind many health records.',
 				points: [

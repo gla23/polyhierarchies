@@ -37,8 +37,10 @@ const props = withDefaults(
 		searchMode?: 'hide' | 'routes' | 'inplace';
 		/** The most levels Unfold all and a search's routes open, as the layout's option; negative, no limit */
 		maxOpenDepth?: number | string;
+		/** What a click on a row does: open it, as Directus does, or select it (double-click opens) */
+		click?: 'opens' | 'selects';
 	}>(),
-	{ density: 'compact', motion: 'auto', repeat: 'once', guides: 'shown', openDepth: 2, treeColumn: 'label', searchMode: 'routes', maxOpenDepth: 5 }
+	{ density: 'compact', motion: 'auto', repeat: 'once', guides: 'shown', openDepth: 2, treeColumn: 'label', searchMode: 'routes', maxOpenDepth: 5, click: 'opens' }
 );
 const focus = defineModel<string | null>('focus', { default: null });
 
@@ -101,9 +103,18 @@ const selection = ref<string[]>([]);
 const showing = ref<{ items: number; matching: number } | null>(null);
 /** Enter in the search goes to the next match; the one it's at, as the layout's Next button says */
 const table = ref<InstanceType<typeof SharedTreeTable>>();
+/** Some of what's shown matches, not all, as the layout has it: only then a next one, or a count */
+const offerNext = computed(() => !!showing.value && showing.value.matching > 0 && showing.value.matching < showing.value.items);
+/** The ↵ only while Enter would go next: the search box has focus, with something in it */
+const searchFocused = ref(false);
 const matchPosition = ref<{ at: number | null; of: number } | null>(null);
 function goToMatch(event?: KeyboardEvent | MouseEvent) {
 	table.value?.goToMatch(event?.shiftKey ? -1 : 1);
+}
+/** The Next button also hands the table the keys, so the arrows carry on from the match */
+function nextFromButton(event: MouseEvent) {
+	goToMatch(event);
+	table.value?.focusTable();
 }
 const sort = ref({ by: 'sort', desc: false });
 
@@ -112,6 +123,21 @@ function onRowClick({ item }: { item: Item }) {
 	const id = (item['--node'] as string | undefined) ?? (item.id as string);
 	focus.value = id;
 	props.editor?.open(id);
+}
+
+/** The selected row, with what can be done to it, as the layout's top bar offers in Directus */
+const selected = ref<Item | null>(null);
+const selectedParent = computed(() => String(selected.value?.['--key'] ?? '').split('/').at(-2) ?? null);
+function addChild() {
+	const node = selected.value?.['--node'];
+	if (!node || !props.editor) return;
+	// Opened first, so the new one shows as it lands
+	table.value?.unfoldCursor();
+	props.editor.add(node);
+}
+function removeFromParent() {
+	const node = selected.value?.['--node'];
+	if (node && selectedParent.value && props.editor) props.editor.unlink(selectedParent.value, node);
 }
 
 type Moved = { node: string; from: string | null; to: string | null; index: number; link: boolean };
@@ -128,21 +154,29 @@ function onEdits(edits: { moved?: Moved | null }) {
 	<div class="tree-table">
 		<label class="search">
 			<KitIcon name="search" small />
-			<input v-model="search" type="search" placeholder="Search" @keydown.enter.prevent="goToMatch" />
+			<input
+				v-model="search"
+				type="search"
+				placeholder="Search"
+				@keydown.enter.prevent="goToMatch"
+				@keydown.esc.prevent="table?.focusTable()"
+				@focus="searchFocused = true"
+				@blur="searchFocused = false"
+			/>
 			<button
-				v-if="matches && matchPosition?.of"
+				v-if="matches && offerNext && matchPosition?.of"
 				type="button"
 				class="next"
-				title="Enter: the next match, opening the way to it (Shift+Enter: back)"
-				@click="goToMatch"
+				title="Select the next match, opening the way to it, and carry on with the arrow keys (Shift-click, or Shift+Enter in the search, goes back). Esc in the search goes into the table too"
+				@click="nextFromButton"
 			>
-				{{ matchPosition.at ? `${matchPosition.at}/${matchPosition.of}` : 'Next' }} ↵
+				{{ matchPosition.at ? `${matchPosition.at}/${matchPosition.of}` : 'Next' }}{{ searchFocused && search.trim() ? ' ↵' : '' }}
 			</button>
 		</label>
 		<p class="tops">
 			<template v-if="showing">
 				{{ showing.items }} {{ showing.items < graph.data.nodes.length ? 'filtered' : '' }}
-				{{ showing.items === 1 ? 'item' : 'items' }}, {{ showing.matching }} matching
+				{{ showing.items === 1 ? 'item' : 'items' }}<template v-if="offerNext">, {{ showing.matching }} matching</template>
 			</template>
 			<template v-else>
 				{{ graph.data.nodes.length }} {{ graph.data.nodes.length === 1 ? 'item' : 'items' }},
@@ -173,14 +207,38 @@ function onEdits(edits: { moved?: Moved | null }) {
 			:matches="searchMode === 'hide' ? null : matches"
 			:keep="searchMode === 'hide' ? matches : null"
 			:search-mode="searchMode === 'hide' ? 'routes' : searchMode"
+			:searching="!!matches"
 			:max-open-depth="Number(maxOpenDepth) < 0 ? null : Number(maxOpenDepth)"
 			:motion="motion"
+			:click-selects="click === 'selects'"
 			@update:headers="onHeaders"
 			@click:row="onRowClick"
 			@update:items="onEdits"
 			@showing="showing = $event"
 			@match-position="matchPosition = $event"
+			@cursor="selected = $event"
 		>
+			<!-- The selected row's actions, after its name, as the layout draws them -->
+			<template #row-tools="{ item }">
+				<!-- Only where a click selects: elsewhere a click already opens -->
+				<button v-if="click === 'selects'" type="button" class="row-tool" title="Open it, as a double-click or Enter does" @click="onRowClick({ item })">
+					<KitIcon name="open_in_new" small />
+				</button>
+				<template v-if="editor">
+					<button type="button" class="row-tool" title="Add a new node inside it" @click="addChild">
+						<KitIcon name="add_row_below" small />
+					</button>
+					<button
+						v-if="selectedParent"
+						type="button"
+						class="row-tool"
+						:title="`Take it out of ${graph.label(selectedParent)}, keeping it under any other parents`"
+						@click="removeFromParent"
+					>
+						<KitIcon name="link_off" small />
+					</button>
+				</template>
+			</template>
 			<template #[`item.label`]="{ item }">
 				<span class="label">
 					<NodeIcon
@@ -246,6 +304,25 @@ function onEdits(edits: { moved?: Moved | null }) {
 
 .next:hover {
 	color: var(--theme--foreground);
+}
+
+/* As Directus's x-small secondary icon buttons */
+.row-tool {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	color: var(--theme--foreground);
+	background: var(--theme--background-normal);
+	border: none;
+	border-radius: var(--theme--border-radius);
+	cursor: pointer;
+}
+
+.row-tool:hover {
+	background: var(--theme--background-accent);
 }
 
 .tops {

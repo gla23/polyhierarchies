@@ -17,6 +17,8 @@ export interface TableKit {
 	vTooltip: Directive;
 	/** Directus's translations, by key: `loading`, `no_items`, `toggle_manual_sorting`, … */
 	t: (key: string) => string;
+	/** Something open over the page that Esc closes first (a menu, a dialog), so the selected row stays */
+	escapeTaken?: () => boolean;
 }
 
 export const tableKitKey: InjectionKey<TableKit> = Symbol('table-kit');

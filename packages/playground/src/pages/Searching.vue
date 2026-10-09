@@ -11,7 +11,7 @@ const placements = [
 	{ name: 'Only in the sidebar', pros: 'Directus’s place for a layout’s settings, saved with the view.', cons: 'Far from the search box: while searching you can’t see what a search will do, or change it in passing.' },
 	{ name: 'One button opening a dialog', pros: 'Room to explain each mode properly, with pictures.', cons: 'The current mode is hidden behind a click, and changing it takes three.' },
 	{ name: 'A strip above the table while searching', pros: 'In context and only when it matters: “5 match, routes shown”, with the switch beside it.', cons: 'Costs a row of height whenever you search, and a filter you left on keeps it there.' },
-	{ name: 'Two compact menus in the top bar', pros: '“Filter: Hide ▾” and “Search: Routes ▾” say the state at a glance, beside Directus’s own search and filter; each menu explains its modes in a line. The sidebar keeps the same settings, saved with the view.', cons: 'Two more buttons in a busy bar; the line of explanation has to be enough.' }
+	{ name: 'Compact menus in the top bar', pros: '“Filter: Hide ▾” says the state at a glance, beside Directus’s own filter, and its menu explains each mode in a line. The sidebar keeps the same settings, saved with the view.', cons: 'More buttons in a busy bar, so only while there’s something for them to act on.' }
 ];
 </script>
 
@@ -31,15 +31,15 @@ const placements = [
 				v-model="searchMode"
 				label="While searching"
 				:options="[
-					{ value: 'hide', label: 'Hide' },
+					{ value: 'hide', label: 'Hide, as a filter' },
 					{ value: 'routes', label: 'Show the routes' },
 					{ value: 'inplace', label: 'Keep my folds' }
 				]"
 			/>
 		</div>
 		<Demo ui="tree-table" data="medicine" :options="{ searchMode, openDepth: 2 }" :height="440">
-			Type "pneumonia" into the search box, then press Enter to go to each match in turn. Hide just
-			removes what doesn't match; Routes opens every way to each match; Keep my folds marks them where
+			Type "pneumonia" into the search box, then press Enter to go to each match in turn. Hide, what a
+			filter does in Directus, just removes what doesn't match; Routes opens every way to each match; Keep my folds marks them where
 			they are and says how many a folded row holds.
 		</Demo>
 
@@ -72,7 +72,7 @@ const placements = [
 			<ExploreLink :to="{ page: 'placements' }">duplicates rule</ExploreLink>: an item is drawn in full
 			once and as a one-row duplicate elsewhere, so there are never more rows than links plus roots.
 			Mirrors repeat whole branches and do multiply, which is why unfolding them stops at 3,000 rows,
-			and <ExploreLink :to="{ page: 'every-path' }">Every path</ExploreLink> stops listing at 50.
+			and <ExploreLink :to="{ page: 'every-path' }">Every path</ExploreLink> stops listing at 20.
 		</p>
 
 		<h2>Cycles</h2>
@@ -130,29 +130,32 @@ const placements = [
 			is. ⌘-clicking Unfold all opens the lot.
 		</p>
 
-		<h2>Hide, highlight, and two layers</h2>
+		<h2>Filters hide, searches look</h2>
 		<p>
-			Not every search is a hunt. A filter like "not archived" is a rule about what belongs in the view
-			at all, and highlighting what's left would be noise. So there's a third mode, <strong>Hide</strong>:
-			what doesn't match simply isn't there, nothing is highlighted, and your folds stay. One thing
-			is kept that didn't match: an ancestor of something that did, dimmed, because without it the match
-			would have nowhere to hang.
+			Not every filter is a hunt. One like "not archived" is a rule about what belongs in the view at
+			all, and highlighting what's left would be noise. So a filter's usual mode is <strong>Hide</strong>:
+			what doesn't match simply isn't there, nothing is highlighted, and your folds stay. One thing is
+			kept that didn't match: an ancestor of something that did, dimmed, because without it the match
+			would have nowhere to hang. (Pick Hide in the demo above to see it.) A filter can also highlight,
+			as a search does, or be turned <strong>Off</strong>: set aside without clearing it, so a careful
+			filter needn't be rebuilt to look at the whole tree for a moment.
 		</p>
 		<p>
-			And a fourth, <strong>Off</strong>, sets a filter or a search aside without clearing it: the tree
-			ignores it until you pick a mode again, so you can compare with and without a careful filter, or
-			look at the whole tree for a moment and come back to your search.
+			A search is nearly always a hunt, so it only highlights, with the routes or in place. Searches were
+			offered Hide and Off too at first, and dropped them: hiding barely differs from the routes in use,
+			and turning a search off is just clearing it. In place earns its keep on a search that matches a
+			lot, where opening every route would bury the tree.
 		</p>
 		<p>
-			In Directus a filter and a search are separate things, so each has its own mode, and they stack.
-			Hide layers take away first; highlight layers then combine as Directus combines them, both must
-			match; and the search's mode decides how the highlights show. The usual pair is a filter that
-			hides (archived items gone) under a search that shows routes (where is "pneumonia"?).
+			In Directus a filter and a search are separate things, so they stack. A filter that hides takes
+			away first; a highlighting filter and the search then combine as Directus combines them, both must
+			match; and the search's way decides how the highlights show. The usual pair is a filter that hides
+			(archived items gone) under a search that shows routes (where is "pneumonia"?).
 		</p>
 
 		<h2>Where the switches go</h2>
 		<p>
-			Three modes times two layers is a lot to explain, and the explanation is needed exactly when you
+			Four ways for a filter and two for a search is a lot to explain, and the explanation is needed exactly when you
 			search. The places weighed:
 		</p>
 		<table class="options">
@@ -172,10 +175,10 @@ const placements = [
 			</tbody>
 		</table>
 		<p>
-			The layout does the last: two menus in the top bar, beside Directus's search and filter, with the
-			same settings in the sidebar as the view's defaults. Whoever finds two more buttons too many turns
-			them off there ("Also as menus in the top bar") and keeps the settings. The playground has only a
-			search box, so its Tree table has a single "While searching" option.
+			The layout does the last, for filters: a menu in the top bar, shown only while a filter is set, with
+			the same setting in the sidebar as the view's default, where the menu can be turned off too. A
+			search has no menu, as its two ways barely differ in use; that's a sidebar setting. The playground
+			has only a search box, so its Tree table has a single "While searching" option.
 		</p>
 
 		<h2>Counting what a fold holds</h2>
@@ -185,10 +188,11 @@ const placements = [
 			item reached by several routes is counted once, which is why the count is of distinct items.
 		</p>
 		<p>
-			While searching or filtering, a folded row counts only matches, and says so: "3 matches below".
-			It used to say "3 below" when hiding, counting what the filter kept, so a row that had said "12
-			below" a moment before read as if nine items had been deleted. Naming what's counted makes the
-			smaller number expected rather than alarming.
+			While searching, a folded row counts the matches inside and says so, "3 matches below", as
+			they're what you're after. With a filter alone it says "3 below", counting what unfolding it
+			would show, and leaves the filter out of it: hiding things is what a filter is for, so what's
+			gone is expected rather than news. The count at the top says how many pass: "5 matching" while
+			searching, "4 pass the filter" with a filter alone.
 		</p>
 
 		<h2>Editing with half the tree hidden</h2>

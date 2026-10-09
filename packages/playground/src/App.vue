@@ -11,6 +11,7 @@ import Concepts from './pages/Concepts.vue';
 import { concepts } from './pages/concepts';
 import Cycles from './pages/Cycles.vue';
 import EveryPath from './pages/EveryPath.vue';
+import Intro from './pages/Intro.vue';
 import LookingUp from './pages/LookingUp.vue';
 import Placements from './pages/Placements.vue';
 import PrimaryParents from './pages/PrimaryParents.vue';
@@ -18,6 +19,7 @@ import PriorArt from './pages/PriorArt.vue';
 import Searching from './pages/Searching.vue';
 import Selection from './pages/Selection.vue';
 import TooBig from './pages/TooBig.vue';
+import WorkedOut from './pages/WorkedOut.vue';
 import Siblings from './pages/Siblings.vue';
 import './pages/reading.css';
 import { current, editorFor, isEdited, reset } from './store';
@@ -40,12 +42,14 @@ function store(key: string, value: unknown) {
 }
 
 const navPages = [
+	{ value: 'intro', label: 'Intro' },
 	{ value: 'explore', label: 'Explore' },
 	{ value: 'prior-art', label: 'Prior art' },
 	{ value: 'concepts', label: 'Concepts' }
 ] as const;
 /** Every page but Explore, by its address; the concept pages sit under the Concepts tab */
 const pageComponents: Record<string, Component> = {
+	intro: Intro,
 	'prior-art': PriorArt,
 	concepts: Concepts,
 	placements: Placements,
@@ -55,6 +59,7 @@ const pageComponents: Record<string, Component> = {
 	searching: Searching,
 	selection: Selection,
 	'too-big': TooBig,
+	'worked-out': WorkedOut,
 	'every-path': EveryPath,
 	'primary-parents': PrimaryParents
 };
@@ -76,7 +81,7 @@ const shortNames: Record<string, string> = {
 /** UIs that were renamed, so old links still land */
 const renamedUis: Record<string, string> = { outline: 'tree-lab' };
 
-const page = ref('explore');
+const page = ref('intro');
 /** Settings a page keeps in the address for itself, such as the node Every path opens on */
 const pageQuery = ref<Record<string, string>>({});
 const datasetId = ref(datasets[0]!.id);
@@ -133,6 +138,18 @@ function setOption(option: OptionDef, raw: string, uiKey = ui.value.id) {
 	options[uiKey] = { ...options[uiKey], [option.key]: value };
 	store('options', options);
 }
+/** A UI's options under their headings, in the order the headings first come; a short list needs none */
+const optionGroups = computed(() => {
+	const groups: { name: string; options: OptionDef[] }[] = [];
+	for (const option of ui.value.options) {
+		const name = option.group ?? '';
+		const group = groups.find((each) => each.name === name);
+		if (group) group.options.push(option);
+		else groups.push({ name, options: [option] });
+	}
+	return groups;
+});
+const optionHeadings = computed(() => optionGroups.value.length > 1 && ui.value.options.length > 3);
 function resetOptions() {
 	delete options[ui.value.id];
 	store('options', options);
@@ -141,7 +158,8 @@ function resetOptions() {
 /** Everything an address can say, applied on load, on Back and Forward, and by links in the pages */
 function applyQuery(query: URLSearchParams) {
 	const asked = query.get('page');
-	page.value = asked && pageComponents[asked] ? asked : 'explore';
+	// A bare address is the intro; one with Explore's settings but no page is Explore, as it always was
+	page.value = asked && pageComponents[asked] ? asked : [...query.keys()].length ? 'explore' : 'intro';
 	const data = query.get('data');
 	if (data && current[data]) datasetId.value = data;
 	const askedUi = query.get('ui');
@@ -162,8 +180,8 @@ applyQuery(new URLSearchParams(location.search));
 addEventListener('popstate', () => applyQuery(new URLSearchParams(location.search)));
 
 /**
- * Explore's side panels, each open, tucked away (it comes back when there's something new for it to
- * explain: another UI, other data) or closed (it stays closed). Each keeps its own width.
+ * Explore's side panels, each open, closed (it opens again when there's something new for it to
+ * explain: another UI, other data) or hidden (it stays away). Each keeps its own width.
  */
 type PanelId = 'ui' | 'options' | 'data';
 interface PanelState {
@@ -171,16 +189,26 @@ interface PanelState {
 	reopen: boolean;
 	width: number;
 }
+// In the rail top to bottom, and the panels left to right
 const dockEntries = [
 	{ id: 'ui', label: 'UI', reopensFor: 'another UI' },
-	{ id: 'options', label: 'Options', reopensFor: 'another UI' },
-	{ id: 'data', label: 'Data', reopensFor: 'other data' }
+	{ id: 'data', label: 'Data', reopensFor: 'other data' },
+	{ id: 'options', label: 'Options', reopensFor: 'another UI' }
 ] as const;
 const panelWidths: Record<PanelId, number> = { ui: 300, options: 280, data: 280 };
+/**
+ * A first visit starts with every panel shut, so the UI is all there is to look at. UI and Data
+ * open by themselves once you pick another UI or dataset; Options waits to be asked for.
+ */
+const firstVisit: Record<PanelId, Pick<PanelState, 'open' | 'reopen'>> = {
+	ui: { open: false, reopen: true },
+	data: { open: false, reopen: true },
+	options: { open: false, reopen: false }
+};
 const savedPanels = stored<Partial<Record<PanelId, Partial<PanelState>>>>('panels', {});
 const panels = reactive(
 	Object.fromEntries(
-		dockEntries.map(({ id }) => [id, { open: true, reopen: true, width: panelWidths[id], ...savedPanels[id] }])
+		dockEntries.map(({ id }) => [id, { ...firstVisit[id], width: panelWidths[id], ...savedPanels[id] }])
 	) as Record<PanelId, PanelState>
 );
 watch(panels, (value) => store('panels', value), { deep: true });
@@ -193,18 +221,22 @@ function closePanel(id: PanelId, reopen: boolean) {
 }
 function railTitle(entry: (typeof dockEntries)[number]) {
 	const { open, reopen } = panels[entry.id];
-	if (open) return `Put ${entry.label} away`;
+	if (open) return `Close ${entry.label}`;
 	return reopen
-		? `Show ${entry.label}. Tucked away, it comes back when you pick ${entry.reopensFor}`
-		: `Show ${entry.label}. Closed, it stays closed until you open it here`;
+		? `Show ${entry.label}. Closed, it opens again when you pick ${entry.reopensFor}`
+		: `Show ${entry.label}. Hidden, it stays away until you open it here`;
 }
-// Something new to explain: what was tucked away comes back, after the first load so a closed one stays shut
-watch(uiId, () => {
-	for (const id of ['ui', 'options'] as const) if (!panels[id].open && panels[id].reopen) panels[id].open = true;
-});
-watch(datasetId, () => {
-	if (!panels.data.open && panels.data.reopen) panels.data.open = true;
-});
+/**
+ * Something new to explain: a closed panel opens again; a hidden one stays away. Only for a pick
+ * made in Explore: a link arriving from another page sets the UI too, and shouldn't greet you with
+ * panels.
+ */
+function reopen(ids: readonly PanelId[], now: string, before: string) {
+	if (now !== 'explore' || before !== 'explore') return;
+	for (const id of ids) if (!panels[id].open && panels[id].reopen) panels[id].open = true;
+}
+watch([uiId, page], ([, now], [, before]) => reopen(['ui', 'options'], now, before));
+watch([datasetId, page], ([, now], [, before]) => reopen(['data'], now, before));
 provide(navigateKey, (href) => {
 	history.pushState(null, '', href);
 	applyQuery(new URL(href, location.href).searchParams);
@@ -372,37 +404,40 @@ const stats = computed(() => {
 				</Transition>
 			</section>
 
-			<div class="dock">
-				<Transition
-					v-for="entry in dockEntries"
-					:key="entry.id"
-					:css="false"
-					@enter="(el, done) => flyOutOf(el, railButtons[entry.id], done)"
-					@leave="(el, done) => flyInto(el, railButtons[entry.id], done)"
+			<!-- Straight in the row with the stage, which takes whatever they leave: a wrapper's own width
+			     was worked out from its panels' unwrapped text in Gecko, and left a gap -->
+			<Transition
+				v-for="entry in dockEntries"
+				:key="entry.id"
+				:css="false"
+				@enter="(el, done) => flyOutOf(el, railButtons[entry.id], done)"
+				@leave="(el, done) => flyInto(el, railButtons[entry.id], done)"
+			>
+				<DockPanel
+					v-if="panels[entry.id].open"
+					:title="panelTitles[entry.id]"
+					:width="panels[entry.id].width"
+					:reopens-for="entry.reopensFor"
+					@close="closePanel(entry.id, $event)"
+					@resize="panels[entry.id].width = $event"
 				>
-					<DockPanel
-						v-if="panels[entry.id].open"
-						:title="panelTitles[entry.id]"
-						:width="panels[entry.id].width"
-						:reopens-for="entry.reopensFor"
-						@close="closePanel(entry.id, $event)"
-						@resize="panels[entry.id].width = $event"
-					>
-						<template v-if="entry.id === 'ui'">
-							<p v-for="(paragraph, index) in ui.about" :key="index">{{ paragraph }}</p>
-							<p v-if="ui.concepts" class="related">
-								Concepts:
-								<template v-for="(id, index) in ui.concepts" :key="id">
-									<ExploreLink :to="{ page: id }">{{ conceptTitle(id) }}</ExploreLink
-									><template v-if="index < ui.concepts.length - 1"> · </template>
-								</template>
-							</p>
-							<p v-if="editor" class="editing"><strong>Editing:</strong> {{ ui.editing }}</p>
-						</template>
+					<template v-if="entry.id === 'ui'">
+						<p v-for="(paragraph, index) in ui.about" :key="index">{{ paragraph }}</p>
+						<p v-if="ui.concepts" class="related">
+							Concepts:
+							<template v-for="(id, index) in ui.concepts" :key="id">
+								<ExploreLink :to="{ page: id }">{{ conceptTitle(id) }}</ExploreLink
+								><template v-if="index < ui.concepts.length - 1"> · </template>
+							</template>
+						</p>
+						<p v-if="editor" class="editing"><strong>Editing:</strong> {{ ui.editing }}</p>
+					</template>
 
-						<template v-else-if="entry.id === 'options'">
-							<div class="options">
-								<div v-for="option in ui.options" :key="option.key" class="option">
+					<template v-else-if="entry.id === 'options'">
+						<div class="options">
+							<template v-for="group in optionGroups" :key="group.name">
+								<h3 v-if="optionHeadings" class="option-group">{{ group.name }}</h3>
+								<div v-for="option in group.options" :key="option.key" class="option">
 									<label :for="`option-${option.key}`">{{ option.label }}</label>
 									<select
 										v-if="option.type === 'choice'"
@@ -425,28 +460,28 @@ const stats = computed(() => {
 									/>
 									<p>{{ option.about }}</p>
 								</div>
-								<button v-if="options[ui.id]" type="button" class="reset" @click="resetOptions">
-									Reset options
-								</button>
-							</div>
-						</template>
-
-						<template v-else>
-							<p>{{ dataset.description }}</p>
-							<dl>
-								<template v-for="[term, value] in stats" :key="term">
-									<dt>{{ term }}</dt>
-									<dd>{{ value.toLocaleString('en-GB') }}</dd>
-								</template>
-							</dl>
-							<template v-if="focusNode">
-								<h2>Every path to {{ focusNode.label }}</h2>
-								<PathList :graph="graph" :id="focusNode.id" :limit="12" @pick="focus = $event" />
 							</template>
+							<button v-if="options[ui.id]" type="button" class="reset" @click="resetOptions">
+								Reset options
+							</button>
+						</div>
+					</template>
+
+					<template v-else>
+						<p>{{ dataset.description }}</p>
+						<dl>
+							<template v-for="[term, value] in stats" :key="term">
+								<dt>{{ term }}</dt>
+								<dd>{{ value.toLocaleString('en-GB') }}</dd>
+							</template>
+						</dl>
+						<template v-if="focusNode">
+							<h2>Every path to {{ focusNode.label }}</h2>
+							<PathList :graph="graph" :id="focusNode.id" :limit="12" @pick="focus = $event" />
 						</template>
-					</DockPanel>
-				</Transition>
-			</div>
+					</template>
+				</DockPanel>
+			</Transition>
 
 			<nav class="rail" aria-label="Panels">
 				<button
@@ -455,7 +490,7 @@ const stats = computed(() => {
 					:ref="(el) => el && (railButtons[entry.id] = el as HTMLElement)"
 					type="button"
 					class="rail-button"
-					:class="{ open: panels[entry.id].open, closed: !panels[entry.id].open && !panels[entry.id].reopen }"
+					:class="{ open: panels[entry.id].open, hidden: !panels[entry.id].open && !panels[entry.id].reopen }"
 					:aria-pressed="panels[entry.id].open"
 					:title="railTitle(entry)"
 					@click="panels[entry.id].open = !panels[entry.id].open"
@@ -641,6 +676,19 @@ h1 {
 	align-self: flex-start;
 }
 
+.option-group {
+	margin: 6px 0 -6px;
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--theme--foreground-subdued);
+}
+
+.option-group:first-child {
+	margin-top: 0;
+}
+
 .related {
 	font-size: 13px;
 	color: var(--theme--foreground-subdued);
@@ -700,13 +748,6 @@ main {
 	padding: 16px;
 }
 
-/* The panels shrink, rather than the stage, when their widths add up to more than there is */
-.dock {
-	display: flex;
-	min-width: 0;
-	min-height: 0;
-}
-
 .rail {
 	display: flex;
 	flex-direction: column;
@@ -742,8 +783,8 @@ main {
 	background: var(--theme--primary-background);
 }
 
-/* Closed for good: still there to open, but quieter than one that will come back by itself */
-.rail-button.closed {
+/* Hidden: still there to open, but quieter than one that will open again by itself */
+.rail-button.hidden {
 	opacity: 0.55;
 }
 
@@ -811,11 +852,6 @@ dd {
 		order: 1;
 		border-left: none;
 		border-top: var(--theme--border-width) solid var(--theme--border-color);
-	}
-
-	.dock {
-		flex-direction: column;
-		order: 2;
 	}
 }
 </style>

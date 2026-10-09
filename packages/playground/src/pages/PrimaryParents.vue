@@ -23,12 +23,12 @@
 			<li>
 				<strong>Repeat the whole subtree in every place.</strong> Honest, but it multiplies — and a
 				cycle never finishes unless it stops where a node would repeat inside its own path. The
-				Outline's <em>Mirrors</em> option, and Workflowy's mirrors.
+				Tree lab's <em>Mirrors</em> option, and Workflowy's mirrors.
 			</li>
 			<li>
 				<strong>Render each node in full once, and repeat it elsewhere as a terminal
 				duplicate.</strong>
-				What the Outline here does. "Once" means the first time it's reached, so the primary parent is
+				What the Tree lab here does by default. "Once" means the first time it's reached, so the primary parent is
 				implicit: it falls out of the order the data happens to be in, and needs no extra data.
 			</li>
 			<li>
@@ -86,7 +86,7 @@
 				<strong>Workflowy</strong>'s
 				<a href="https://blog.workflowy.com/mirrors-create-live-copies-of-any-bullet/">mirrors</a> put the same item in several
 				places, every copy live and identical, with a small mark saying it lives elsewhere. The
-				Outline's <em>Mirrors</em> option draws placements that way.
+				Tree lab's <em>Mirrors</em> option draws placements that way.
 			</li>
 			<li>
 				<strong>Logseq</strong> and <strong>Roam</strong> do it with block references and embeds, and
@@ -118,7 +118,7 @@
 			All parents equal is the simpler model, and the one every UI here starts from. A primary parent
 			is a layer on top — worth adding when something needs one place to be stable (a breadcrumb, a
 			URL, a canonical page), and worth comparing against the implicit "first reached" one the
-			Outline already gets for free.
+			Tree lab already gets for free.
 		</p>
 	</article>
 </template>

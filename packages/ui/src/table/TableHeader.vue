@@ -30,8 +30,8 @@ const props = withDefaults(
 		drawnWidths?: Record<string, number>;
 		/** Every item with children folded: the chevron over the rows' ones unfolds them all */
 		allFolded?: boolean;
-		/** What unfolding them all does, a second line for a modifier's way */
-		unfoldAllLabel?: string;
+		/** What the chevron does, as its tooltip says it, a line for each modifier's way */
+		foldAllTip?: string;
 		/** More than one item has children: with one, its own chevron does the same */
 		canFoldAll?: boolean;
 		/** A parent field is set, so turning manual sorting on would show the hierarchy */
@@ -39,7 +39,7 @@ const props = withDefaults(
 	}>(),
 	{
 		showSelect: 'none',
-		unfoldAllLabel: 'Unfold all',
+		foldAllTip: 'Fold all',
 		showResize: false,
 		showManualSort: false,
 		someItemsSelected: false,
@@ -238,11 +238,11 @@ function toggleManualSort() {
 					>
 						<button
 							v-if="canFoldAll"
-							v-tooltip="allFolded ? unfoldAllLabel : 'Fold all'"
+							v-tooltip="foldAllTip"
 							type="button"
 							class="fold-all"
 							:class="{ 'all-folded': allFolded }"
-							:aria-label="allFolded ? unfoldAllLabel.split('\n')[0] : 'Fold all'"
+							:aria-label="foldAllTip.split('\n')[0]"
 							@click="$emit('toggle-fold-all', $event)"
 						>
 							<v-icon name="expand_more" />

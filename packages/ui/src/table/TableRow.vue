@@ -48,6 +48,10 @@ const props = withDefaults(
 		hintColumn?: string;
 		/** Drawn in full somewhere else: dimmed, a pointer rather than the item itself */
 		duplicate?: boolean;
+		/** The table's selected row (see the table's cursor) */
+		cursor?: boolean;
+		/** Draws the table's `row-tools` slot after its name: the selected row, while it shows as selected */
+		tools?: boolean;
 		/** Matches the search */
 		match?: boolean;
 		/** The node the host is looking at, in its full placement */
@@ -68,7 +72,7 @@ const props = withDefaults(
 );
 
 // The pointer events too: declared, a new listener from the table doesn't count as a change to redraw for
-const emit = defineEmits(['click', 'item-selected', 'toggle-children', 'chevron-hover', 'hint-click', 'mouseenter', 'mouseleave', 'mouseover']);
+const emit = defineEmits(['click', 'dblclick', 'item-selected', 'toggle-children', 'chevron-hover', 'hint-click', 'mouseenter', 'mouseleave', 'mouseover']);
 
 // Told to the table, which marks the rows far off screen
 const tableRows = inject<{ added: (row: Element) => void; removed: (row: Element) => void } | null>('table-rows', null);
@@ -177,8 +181,10 @@ function usePreventClickAfterDragging({
 			match,
 			context,
 			current,
+			cursor,
 		}"
 		@click="onClick"
+		@dblclick="emit('dblclick', $event)"
 		@mouseenter="emit('mouseenter', $event)"
 		@mouseleave="emit('mouseleave', $event)"
 		@mouseover="emit('mouseover', $event)"
@@ -312,6 +318,14 @@ function usePreventClickAfterDragging({
 			>
 				{{ hint.text }}
 			</button>
+			<span
+				v-if="tools && header.value === hintColumn && cellSlots?.['row-tools']"
+				class="row-tools"
+				@click.stop
+				@dblclick.stop
+			>
+				<SlotOf :render="cellSlots['row-tools']" :item />
+			</span>
 		</td>
 
 		<td class="spacer cell" />
@@ -368,12 +382,17 @@ function usePreventClickAfterDragging({
 	font-weight: 600;
 }
 
-.table-row.context .cell:not(.controls) > * {
+.table-row.context .cell:not(.controls) > :not(.v-menu),
+.table-row.context .cell:not(.controls) > :deep(.v-menu > .v-menu-activator > *) {
 	opacity: 0.6;
 }
 
-/* A duplicate points at the full placement elsewhere, so it reads as quieter than the real thing */
-.table-row.duplicate .cell:not(.controls) > * {
+/* A duplicate points at the full placement elsewhere, so it reads as quieter than the real thing,
+   handle and all. A menu (a display's list of related items) is dimmed through what's in it: Directus
+   gives the menu and its activator no box, which takes no opacity */
+.table-row.duplicate .cell:not(.controls) > :not(.v-menu),
+.table-row.duplicate .cell:not(.controls) > :deep(.v-menu > .v-menu-activator > *),
+.table-row.duplicate .drag-handle {
 	opacity: 0.55;
 }
 
@@ -403,6 +422,15 @@ function usePreventClickAfterDragging({
 	flex-shrink: 0;
 }
 
+/* The selected row's actions, after its name, which gives way to them */
+.row-tools {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: 2px;
+	margin-left: 8px;
+}
+
 /* Still shrinks, once the hint has gone, so a long name ends in an ellipsis rather than overflowing */
 .cell.placed > :first-child {
 	min-width: 0;
@@ -410,6 +438,11 @@ function usePreventClickAfterDragging({
 
 .table-row.duplicate .cell:not(.controls) > .placement-hint {
 	opacity: 1;
+}
+
+/* Except where the full placement is, the one thing on the row worth reading */
+.table-row.duplicate .placement-hint.home:not(:hover) {
+	color: var(--theme--foreground);
 }
 
 .chevron-slot {

@@ -24,12 +24,13 @@ interface Props {
 	junctionChild: string | null;
 	junctionSort: string | null;
 	treeColumn: string;
-	searchMode: LayerMode;
+	searchMode: 'routes' | 'inplace';
 	filterMode: LayerMode;
 	modeMenus: boolean;
 	showGuides: boolean;
 	openDepth: number | null;
 	maxOpenDepth: number | null;
+	rowClick: 'opens' | 'selects';
 	sortField: string;
 	collection: string;
 	fieldsInCollection: any;
@@ -54,6 +55,7 @@ const emit = defineEmits([
 	'update:showGuides',
 	'update:openDepth',
 	'update:maxOpenDepth',
+	'update:rowClick',
 	'update:activeFields',
 	'update:fields',
 ]);
@@ -71,6 +73,10 @@ const treeColumnWritable = useSync(props, 'treeColumn', emit);
 const searchModeWritable = useSync(props, 'searchMode', emit);
 const filterModeWritable = useSync(props, 'filterMode', emit);
 const modeMenusWritable = useSync(props, 'modeMenus', emit);
+const searchModeItems = [
+	{ text: 'Show the routes to the matches', value: 'routes' },
+	{ text: 'Keep my folds, mark the matches', value: 'inplace' },
+];
 const modeItems = [
 	{ text: 'Hide what doesn’t match', value: 'hide' },
 	{ text: 'Show the routes to the matches', value: 'routes' },
@@ -80,6 +86,11 @@ const modeItems = [
 const showGuidesWritable = useSync(props, 'showGuides', emit);
 const openDepthWritable = useSync(props, 'openDepth', emit);
 const maxOpenDepthWritable = useSync(props, 'maxOpenDepth', emit);
+const rowClickWritable = useSync(props, 'rowClick', emit);
+const rowClickItems = [
+	{ text: 'Opens it', value: 'opens' },
+	{ text: 'Selects it (double-click opens)', value: 'selects' },
+];
 const maxOpenDepthItems = [
 	...[2, 3, 4, 5, 6, 8, 10].map((depth) => ({ text: String(depth), value: depth })),
 	{ text: 'No limit', value: -1 },
@@ -194,227 +205,264 @@ const ready = computed(() =>
 </script>
 
 <template>
-	<div class="field">
-		<div class="type-label">
-			Hierarchy
-		</div>
-		<v-select
-			v-model="hierarchyWritable"
-			:items="hierarchyItems"
-		/>
-	</div>
-
-	<div
-		v-if="hierarchy !== 'polyhierarchy'"
-		class="field"
+	<v-detail
+		label="Hierarchy"
+		class="section"
+		:start-open="!ready"
 	>
-		<div class="type-label">
-			Parent (M2O)
-		</div>
-
-		<v-notice
-			v-if="!sortField || !selfReferencingM2oFields?.length"
-			type="info"
-			class="setup"
-		>
-			<div>
-				<p>This layout nests each item under its parent. It needs two fields, set up in this collection's data model settings:</p>
-				<ol>
-					<li :class="{ done: sortField }">
-						A sort field: an integer field, chosen as the collection's sort field
-					</li>
-					<li :class="{ done: selfReferencingM2oFields?.length }">
-						A parent field: a many-to-one field that relates to this same collection
-					</li>
-				</ol>
-				<p>Then choose the parent field here.</p>
-			</div>
-		</v-notice>
-
-		<template v-else>
-			<v-select
-				v-model="parentFieldWritable"
-				:items="selfReferencingM2oFields"
-				item-text="name"
-				item-value="field"
-				show-deselect
-				:placeholder="t('select_a_field')"
-			/>
-
-			<small
-				v-if="!parentFieldWritable"
-				class="type-note"
-			>The field that holds each item's parent. Choosing one can rewrite your items' sort values.</small>
-		</template>
-	</div>
-
-	<template v-else>
 		<div class="field">
 			<div class="type-label">
-				Links (junction)
+				Type
 			</div>
+			<v-select
+				v-model="hierarchyWritable"
+				:items="hierarchyItems"
+			/>
+		</div>
+
+		<div
+			v-if="hierarchy !== 'polyhierarchy'"
+			class="field"
+		>
+			<div class="type-label">
+				Parent (M2O)
+			</div>
+
 			<v-notice
-				v-if="!junctionItems.length"
+				v-if="!sortField || !selfReferencingM2oFields?.length"
 				type="info"
 				class="setup"
 			>
 				<div>
-					<p>A polyhierarchy keeps its links in a junction collection: one row per parent → child link, with two many-to-one fields that both point at this collection.</p>
-					<p>Create one in the data model settings (a many-to-many from this collection to itself makes one), then choose it here.</p>
+					<p>This layout nests each item under its parent. It needs two fields, set up in this collection's data model settings:</p>
+					<ol>
+						<li :class="{ done: sortField }">
+							A sort field: an integer field, chosen as the collection's sort field
+						</li>
+						<li :class="{ done: selfReferencingM2oFields?.length }">
+							A parent field: a many-to-one field that relates to this same collection
+						</li>
+					</ol>
+					<p>Then choose the parent field here.</p>
 				</div>
 			</v-notice>
+
 			<template v-else>
 				<v-select
-					:model-value="junction"
-					:items="junctionItems"
+					v-model="parentFieldWritable"
+					:items="selfReferencingM2oFields"
+					item-text="name"
+					item-value="field"
 					show-deselect
-					placeholder="Choose the links collection"
-					@update:model-value="pickJunction"
+					:placeholder="t('select_a_field')"
 				/>
-				<small class="type-note">One row per link. Order and editing work on these rows, not on the items.</small>
+
+				<small
+					v-if="!parentFieldWritable"
+					class="type-note"
+				>The field that holds each item's parent. Choosing one can rewrite your items' sort values.</small>
 			</template>
 		</div>
 
-		<div
-			v-if="junction"
-			class="field"
-		>
-			<div class="type-label">
-				Parent and child
-			</div>
-			<div class="ends">
-				<v-select
-					v-model="junctionParentWritable"
-					:items="junctionFieldItems"
-					placeholder="Parent field"
-				/>
-				<v-button
-					v-tooltip="'Swap: the same links, the hierarchy upside down'"
-					class="swap"
-					icon
-					secondary
-					small
-					@click="swap"
+		<template v-else>
+			<div class="field">
+				<div class="type-label">
+					Links (junction)
+				</div>
+				<v-notice
+					v-if="!junctionItems.length"
+					type="info"
+					class="setup"
 				>
-					<v-icon name="swap_vert" />
-				</v-button>
-				<v-select
-					v-model="junctionChildWritable"
-					:items="junctionFieldItems"
-					placeholder="Child field"
-				/>
+					<div>
+						<p>A polyhierarchy keeps its links in a junction collection: one row per parent → child link, with two many-to-one fields that both point at this collection.</p>
+						<p>Create one in the data model settings (a many-to-many from this collection to itself makes one), then choose it here.</p>
+					</div>
+				</v-notice>
+				<template v-else>
+					<v-select
+						:model-value="junction"
+						:items="junctionItems"
+						show-deselect
+						placeholder="Choose the links collection"
+						@update:model-value="pickJunction"
+					/>
+					<small class="type-note">Each row in this collection links a parent to a child. Dragging and reordering change these rows, not the items.</small>
+				</template>
 			</div>
-			<small class="type-note">Which field of a link is the parent. Swapping them shows everything a node belongs to instead of what it holds.</small>
-		</div>
 
-		<div
-			v-if="junction"
-			class="field"
-		>
-			<div class="type-label">
-				Order of children
+			<div
+				v-if="junction"
+				class="field"
+			>
+				<div class="type-label">
+					Parent and child
+				</div>
+				<div class="ends">
+					<v-select
+						v-model="junctionParentWritable"
+						:items="junctionFieldItems"
+						placeholder="Parent field"
+					/>
+					<v-button
+						v-tooltip="'Swap: the same links, the hierarchy upside down'"
+						class="swap"
+						icon
+						secondary
+						small
+						@click="swap"
+					>
+						<v-icon name="swap_vert" />
+					</v-button>
+					<v-select
+						v-model="junctionChildWritable"
+						:items="junctionFieldItems"
+						placeholder="Child field"
+					/>
+				</div>
+				<small class="type-note">Which field of a link holds the parent. Swap them to see everything an item belongs to, rather than what it contains.</small>
 			</div>
-			<v-select
-				v-model="junctionSortWritable"
-				:items="junctionSortItems"
-				show-deselect
-				placeholder="As the links were made"
-			/>
-			<small class="type-note">An integer field on the links, so a node's place can differ under each parent. Without one, children can't be reordered.</small>
-		</div>
-	</template>
+
+			<div
+				v-if="junction"
+				class="field"
+			>
+				<div class="type-label">
+					Order of children
+				</div>
+				<v-select
+					v-model="junctionSortWritable"
+					:items="[{ text: 'None: as the links were made', value: '$none' }, ...junctionSortItems]"
+				/>
+				<small class="type-note">An integer field on the links, so an item can have a different place under each parent. Without one, children can't be reordered.</small>
+			</div>
+		</template>
+	</v-detail>
 
 	<template v-if="ready">
-		<div class="field">
-			<div class="type-label">
-				{{ t("layouts.tabular.spacing") }}
+		<v-detail
+			label="Display"
+			class="section"
+			start-open
+		>
+			<div class="field">
+				<div class="type-label">
+					{{ t("layouts.tabular.spacing") }}
+				</div>
+				<v-select
+					v-model="tableSpacingWritable"
+					:items="[
+						{
+							text: t('layouts.tabular.compact'),
+							value: 'compact',
+						},
+						{
+							text: t('layouts.tabular.cozy'),
+							value: 'cozy',
+						},
+						{
+							text: t('layouts.tabular.comfortable'),
+							value: 'comfortable',
+						},
+					]"
+				/>
 			</div>
-			<v-select
-				v-model="tableSpacingWritable"
-				:items="[
-					{
-						text: t('layouts.tabular.compact'),
-						value: 'compact',
-					},
-					{
-						text: t('layouts.tabular.cozy'),
-						value: 'cozy',
-					},
-					{
-						text: t('layouts.tabular.comfortable'),
-						value: 'comfortable',
-					},
-				]"
-			/>
-		</div>
 
-		<div class="field">
-			<div class="type-label">
-				Tree column
+			<div class="field">
+				<div class="type-label">
+					Tree column
+				</div>
+				<v-select
+					v-model="treeColumnWritable"
+					:items="treeColumnItems"
+				/>
+				<small class="type-note">This column, and every column before it, moves right with each level, so the columns after it stay in line. Hints such as “12 below” appear in it.</small>
+				<v-checkbox
+					v-model="showGuidesWritable"
+					block
+					label="Lines down each open item"
+					class="checkbox"
+				/>
 			</div>
-			<v-select
-				v-model="treeColumnWritable"
-				:items="treeColumnItems"
-			/>
-			<small class="type-note">The column that indents with each level, and every column before it; the rest stay in line. It stays the same column when columns are reordered, and hints like “in Fruit” and “12 below” go in it.</small>
-		</div>
+		</v-detail>
 
-		<div class="field">
-			<div class="type-label">
-				Levels open to start
+		<v-detail
+			label="Folding"
+			class="section"
+			start-open
+		>
+			<div class="field">
+				<div class="type-label">
+					Levels open to start
+				</div>
+				<v-select
+					v-model="openDepthWritable"
+					:items="openDepthItems"
+				/>
+				<small class="type-note">How many levels are open when the view loads. Folds you change are remembered in this browser.</small>
+				<v-button
+					class="reset-folds"
+					small
+					secondary
+					@click="resetFolds"
+				>
+					Reset my folds
+				</v-button>
 			</div>
-			<v-select
-				v-model="openDepthWritable"
-				:items="openDepthItems"
-			/>
-			<v-button
-				class="reset-folds"
-				small
-				secondary
-				@click="resetFolds"
-			>
-				Reset my folds
-			</v-button>
-			<div class="type-label opened-label">
-				Levels opened at most
-			</div>
-			<v-select
-				v-model="maxOpenDepthWritable"
-				:items="maxOpenDepthItems"
-			/>
-			<small class="type-note">By Unfold all and by a search's routes, so a deep tree doesn't indent the other columns off screen. Opening one row or going to one match goes as deep as it needs; {{ keys.inside }}-click a chevron for everything inside.</small>
-		</div>
 
-		<div class="field">
-			<div class="type-label">
-				Filters
+			<div class="field">
+				<div class="type-label">
+					Levels opened at most
+				</div>
+				<v-select
+					v-model="maxOpenDepthWritable"
+					:items="maxOpenDepthItems"
+				/>
+				<small class="type-note">The deepest that Unfold all and a search's routes will open, so a deep tree doesn't push the other columns off screen. Opening a single row, or going to one match, goes as deep as it needs.</small>
+				<small class="type-note">{{ keys.inside }}-click a chevron to fold or unfold everything inside it, and {{ keys.siblings }}-click to include its siblings.<template v-if="hierarchy === 'polyhierarchy'"> Hold {{ keys.siblings }} as you drop a dragged row to add a parent rather than move it.</template></small>
 			</div>
-			<v-select v-model="filterModeWritable" :items="modeItems" />
-			<div class="type-label search-label">
-				Search
-			</div>
-			<v-select v-model="searchModeWritable" :items="modeItems" />
-			<v-checkbox
-				v-model="modeMenusWritable"
-				block
-				label="Also as menus in the top bar"
-				class="menus-toggle"
-			/>
-			<small class="type-note">Each has its own, so a filter can hide archived items while a search highlights on top. Hide: what doesn’t match isn’t there, nothing is highlighted, folds stay, and an ancestor stays dimmed only to hold a match’s place. Routes: every way to a match opens, the rest hides, and folds made meanwhile last only as long as the search. Keep my folds: the matches are marked where they are, and folded rows say how many they hold. Off sets one aside without clearing it. Enter in the search goes to the next match, opening the way to it. Rows can be dragged in every mode.</small>
-		</div>
+		</v-detail>
 
-		<div class="field">
-			<div class="type-label">
-				Folding
+		<v-detail
+			label="Search and filters"
+			class="section"
+			start-open
+		>
+			<div class="field">
+				<div class="type-label">
+					Search
+				</div>
+				<v-select v-model="searchModeWritable" :items="searchModeItems" />
+				<div class="type-label search-label">
+					Filters
+				</div>
+				<v-select v-model="filterModeWritable" :items="modeItems" />
+				<v-checkbox
+					v-model="modeMenusWritable"
+					block
+					label="Filter menu in the top bar while filtering"
+					class="checkbox"
+				/>
+				<small class="type-note">A search either opens every way to its matches, hiding the rest, or marks them where they are and keeps your folds; in both, Enter in the search goes to the next match. A filter can do either too, hide what doesn't match while keeping your folds, or be turned off without clearing it.</small>
 			</div>
-			<v-checkbox
-				v-model="showGuidesWritable"
-				block
-				label="Lines down each open item"
-			/>
-			<small class="type-note">{{ keys.inside }}-click a chevron for everything inside it,
-				{{ keys.siblings }}-click for it and its siblings.<template v-if="hierarchy === 'polyhierarchy'"> Hold {{ keys.siblings }} while dropping a dragged row to add a parent rather than move it.</template></small>
-		</div>
+		</v-detail>
+
+		<v-detail
+			label="Clicking"
+			class="section"
+			start-open
+		>
+			<div class="field">
+				<div class="type-label">
+					Clicking a row
+				</div>
+				<v-select
+					v-model="rowClickWritable"
+					:items="rowClickItems"
+				/>
+				<small class="type-note">Opens it is Directus's usual behaviour, and {{ keys.siblings }}-click selects a row instead (hold {{ keys.siblings }} to see which). Selects it makes a click select the row, and a double-click opens the item. A selected row's actions follow its name: <template v-if="hierarchy === 'polyhierarchy'">add parents or children, or unlink it from the parent it's under</template><template v-else>reparent it</template>, and open it when a click selects. Either way, the arrow keys move through the rows and Enter opens one.</small>
+			</div>
+		</v-detail>
 	</template>
 </template>
 
@@ -469,8 +517,18 @@ const ready = computed(() =>
 	}
 }
 
-.menus-toggle {
+.checkbox {
 	margin-top: 12px;
+}
+
+/* Directus's collapsible headings. The options sit on a two-column grid that only spans its own
+   fields, so a section spans it too, or each landed in one column on top of the next */
+.section {
+	grid-column: 1 / -1;
+}
+
+.section .field + .field {
+	margin-top: 20px;
 }
 
 .search-label {
@@ -481,7 +539,12 @@ const ready = computed(() =>
 	margin-top: 8px;
 }
 
-.opened-label {
-	margin-top: 16px;
+/* A note of its own per line, where a field has two */
+small.type-note {
+	display: block;
+}
+
+small.type-note + small.type-note {
+	margin-top: 6px;
 }
 </style>

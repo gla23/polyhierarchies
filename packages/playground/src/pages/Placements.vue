@@ -26,15 +26,15 @@ const repeat = ref<'once' | 'mirror'>('once');
 				]"
 			/>
 		</div>
-		<Demo ui="tree-lab" data="medicine" focus="pneumonia" :options="{ repeat, openDepth: 8 }" :height="460">
-			Pneumonia is under Disorder of lung and under Inflammatory disorder. As a duplicate, its second
-			placement is one dashed line; as a mirror, its whole branch comes along.
+		<Demo ui="tree-lab" data="food" focus="tomato" :options="{ repeat, openDepth: 8 }" :height="460">
+			Tomato is under Fruit, Vegetable and Salad. As duplicates, its other two placements are one
+			dashed line each; as mirrors, its varieties come along to every place.
 		</Demo>
 
 		<h2>The rule</h2>
 		<p>
 			Each place a node appears is a <strong>placement</strong>: the node reached by one particular
-			route from a root. Pneumonia has two; in the Food dataset, Tomato has three. The trees here draw a node <strong>in full</strong> the
+			route from a root. Tomato has three; in the Medicine dataset, Pneumonia has two. The trees here draw a node <strong>in full</strong> the
 			first time a depth-first walk from the roots reaches it, and every other placement as a
 			<strong>terminal duplicate</strong>: dashed, with no children of its own, saying where the full
 			one is ("in Fruit"). Click one and the focus moves to the full placement.

@@ -110,6 +110,13 @@ const props = withDefaults(
 		maxOpenDepth?: number | null;
 		/** Folds animate: auto, while few enough rows are drawn to stay smooth */
 		motion?: 'auto' | 'on' | 'off';
+		/** A click selects the row rather than opening it; a double-click opens it */
+		clickSelects?: boolean;
+		/**
+		 * The highlights come from a search, so a folded row counts the matches inside ("3 matches
+		 * below"); from a filter alone it counts what unfolding it would show ("3 below")
+		 */
+		searching?: boolean;
 	}>(),
 	{
 		itemKey: 'id',
@@ -136,6 +143,8 @@ const props = withDefaults(
 		openDepth: null,
 		maxOpenDepth: null,
 		motion: 'auto',
+		clickSelects: false,
+		searching: true,
 		graph: null,
 		repeat: 'once',
 		readonly: false,
@@ -163,9 +172,10 @@ const emit = defineEmits([
 	'update:items',
 	'showing',
 	'match-position',
+	'cursor',
 ]);
 
-const { VProgressLinear, t } = useTableKit();
+const { VProgressLinear, t, escapeTaken } = useTableKit();
 
 // CORE CHANGES
 // import { i18n } from "@/lang";
@@ -493,6 +503,8 @@ const {
 	onSortUpdate,
 	setAllCollapsed,
 	setCollapsed,
+	resetFolds,
+	ownFolds,
 } = useTreeView({
 	internalItems,
 	graph: toRef(props, 'graph'),
@@ -636,8 +648,8 @@ const animated = computed(() =>
 );
 /**
  * In a big tree a fold would drop its rows at once, as only the rows showing are drawn: they stay a
- * moment, folding shut, then go. Rows that appear are new, and grow from nothing (`@starting-style`)
- * once the table has settled, so they don't all grow as it first draws.
+ * moment, folding shut, then go. Rows that appear grow from nothing (`arriving`), once the table has
+ * settled, so they don't all grow as it first draws.
  */
 const leaving = shallowRef(new Set<string>());
 let left: ReturnType<typeof setTimeout> | undefined;
@@ -663,6 +675,29 @@ const drawnOnly = computed(() => {
 	const stay = leaving.value;
 	return (item: Item) => !rowHidden(item) || stay.has(item[rowKey]);
 });
+/**
+ * The rows that grow from nothing: new to the page, whether opened in a big tree or just added. Not
+ * one the page had that has only moved, by a drag or a sort, or has a new key under a new parent:
+ * the browser takes a moved row for a new one, and growing it afresh shifts the rows under a
+ * pointer held still, which the drag then takes for a move.
+ */
+const arriving = shallowRef(new Set<string>());
+let arrived: ReturnType<typeof setTimeout> | undefined;
+watch(
+	() => (animated.value && settled.value ? (drawnOnly.value ? internalItems.value.filter(drawnOnly.value) : [...internalItems.value]) : null),
+	(now, before) => {
+		if (!now || !before)
+			return;
+		const keys = new Set(before.map((row) => row[rowKey]));
+		const nodes = new Set(before.map((row) => row['--node'] ?? row[rowKey]));
+		const fresh = now.filter((row) => !keys.has(row[rowKey]) && !nodes.has(row['--node'] ?? row[rowKey]));
+		if (!fresh.length)
+			return;
+		arriving.value = new Set(fresh.map((row) => String(row[rowKey])));
+		clearTimeout(arrived);
+		arrived = setTimeout(() => (arriving.value = new Set()), 200);
+	},
+);
 
 /**
  * Hovering a row lights every placement of the same node: a class set straight on those few rows,
@@ -725,6 +760,8 @@ function goToMatch(step: 1 | -1 = 1) {
 	const at = matchAt.value === null ? -1 : rows.indexOf(matchAt.value);
 	const next = at < 0 ? (step > 0 ? 0 : rows.length - 1) : (at + step + rows.length) % rows.length;
 	matchAt.value = rows[next]!;
+	cursor.value = rows[next]!;
+	keyed.value = true;
 	void goTo(rows[next]!);
 }
 watch([() => props.matches, () => props.keep], ([matches, keep], [hadMatches, hadKeep]) => {
@@ -738,7 +775,45 @@ watch([matchAt, matchRows], () => {
 	const index = matchAt.value === null ? -1 : matchRows.value.indexOf(matchAt.value);
 	emit('match-position', { at: index < 0 ? null : index + 1, of: matchRows.value.length });
 }, { immediate: true });
-defineExpose({ goToMatch });
+/**
+ * Esc lets go of the selected row from anywhere but a field being typed in, unless something open
+ * takes it first: a menu, a dialog, the drawer this table picks in. Capturing, so that's as it was
+ * before anything closed.
+ */
+const typing = (target: EventTarget | null) =>
+	target instanceof HTMLElement
+	&& (target.isContentEditable || target.matches('textarea, select, input:not([type=checkbox], [type=radio], [type=button])'));
+useEventListener(window, 'keydown', (event: KeyboardEvent) => {
+	if (event.key === 'Escape' && cursor.value !== null && !typing(event.target) && !escapeTaken?.())
+		cursor.value = null;
+}, { capture: true });
+/** A picker's ⌘Enter: ticks the selected row, if it shows and isn't ticked yet; false with none showing */
+function pickCursor() {
+	const row = cursorRow.value;
+	if (!row || !(keyed.value || props.clickSelects) || props.showSelect === 'none')
+		return false;
+	if (!getSelectedState(row))
+		onItemSelected({ item: row, value: true });
+	return true;
+}
+
+/** Opens the selected row, even with nothing inside yet, so a child just given to it shows */
+function unfoldCursor() {
+	if (cursorRow.value)
+		setRowOpen(cursorRow.value, true);
+}
+
+/** From the search, Esc: into the table at the selected row (or the first match showing), keys and all */
+function focusTable() {
+	if (cursor.value === null || !rowsByKey.value.has(cursor.value)) {
+		const showing = visibleRows();
+		const first = showing.find((row) => matchRows.value.includes(String(row[rowKey]))) ?? showing[0];
+		cursor.value = first ? String(first[rowKey]) : null;
+	}
+	keyed.value = true;
+	tableEl.value?.focus({ preventScroll: true });
+}
+defineExpose({ goToMatch, focusTable, pickCursor, unfoldCursor });
 
 /**
  * Rows over a screen away are marked far and drawn without their cells, so restyling the page, as
@@ -775,7 +850,7 @@ function onHintClick(item: Item, kind: 'home' | 'loop' | 'count' | 'matches') {
 	const key = String(item[rowKey]);
 	const path = key.split('/');
 	if (kind === 'count') {
-		setCollapsed([key, ...reachFrom(item, 'inside')], false);
+		openRows([key, ...reachFrom(item, 'inside').map(String)]);
 	}
 	else if (kind === 'matches') {
 		// Open the routes inside this row that lead to a match, and only those, however deep
@@ -799,6 +874,116 @@ function onHintClick(item: Item, kind: 'home' | 'loop' | 'count' | 'matches') {
 	}
 }
 const rowsByKey = computed(() => new Map(internalItems.value.map((row) => [String(row[rowKey]), row])));
+
+/**
+ * The selected row: a cursor the arrow keys move once the table has focus, and in click-selects
+ * mode the row a click picks. Directus's table has none; its checkboxes are for batch actions.
+ */
+const cursor = ref<string | null>(null);
+const tableEl = ref<HTMLTableElement>();
+/** Moved by the keyboard since the last click, so the cursor is shown even where a click opens */
+const keyed = ref(false);
+const cursorRow = computed(() => (cursor.value === null ? null : rowsByKey.value.get(cursor.value) ?? null));
+watch(cursorRow, (row) => emit('cursor', row));
+// Gone in a reload or a move: nothing selected rather than a row that isn't there
+watch(rowsByKey, (rows) => {
+	if (cursor.value !== null && !rows.has(cursor.value))
+		cursor.value = null;
+});
+const visibleRows = () => internalItems.value.filter((row) => !rowHidden(row));
+
+function onRowClick(item: Item, event: MouseEvent) {
+	cursor.value = String(item[rowKey]);
+	// ⌥/Alt-clicked, a row is selected rather than opened, wherever a click opens
+	keyed.value = event.altKey;
+	// A row's mousedown starts a drag, which keeps the browser from focusing the table itself
+	tableEl.value?.focus({ preventScroll: true });
+	if (!props.clickSelects && !event.altKey && !props.disabled && props.clickable)
+		emit('click:row', { item, event });
+}
+function onRowDoubleClick(item: Item, event: MouseEvent) {
+	if (props.clickSelects && !props.disabled && props.clickable)
+		emit('click:row', { item, event });
+}
+
+/** Opens or folds one row, for this search only while its routes show */
+function setRowOpen(item: Item, open: boolean) {
+	if (!searchRoutes.value)
+		return setCollapsed([item[rowKey]], !open);
+	const key = String(item[rowKey]);
+	if (open) {
+		openRows([key]);
+	}
+	else {
+		searchFolds.add(key);
+		searchOpened.delete(key);
+	}
+}
+
+/** The arrow keys walk the rows showing, → and ← open and fold (or step in and out), Enter opens */
+function onTableKey(event: KeyboardEvent) {
+	if (event.target !== tableEl.value || event.altKey || event.metaKey || event.ctrlKey)
+		return;
+	const rows = visibleRows();
+	if (!rows.length)
+		return;
+	const at = rows.findIndex((row) => row[rowKey] === cursor.value);
+	const item = at < 0 ? null : rows[at]!;
+	let next: Item | undefined;
+	switch (event.key) {
+		case 'ArrowDown':
+			next = rows[Math.min(rows.length - 1, at + 1)];
+			break;
+		case 'ArrowUp':
+			next = rows[Math.max(0, at - 1)];
+			break;
+		case 'Home':
+			next = rows[0];
+			break;
+		case 'End':
+			next = rows.at(-1);
+			break;
+		case 'PageDown':
+			next = rows[Math.min(rows.length - 1, Math.max(0, at) + 10)];
+			break;
+		case 'PageUp':
+			next = rows[Math.max(0, at - 10)];
+			break;
+		case 'ArrowRight':
+			if (item && hasChildren(item) && rowFolded(item))
+				setRowOpen(item, true);
+			else if (item && rows[at + 1]?.[itemParent] === item[rowKey])
+				next = rows[at + 1];
+			else if (!item)
+				next = rows[0];
+			break;
+		case 'ArrowLeft':
+			if (item && hasChildren(item) && !rowFolded(item))
+				setRowOpen(item, false);
+			else if (item)
+				next = rows.find((row) => row[rowKey] === item[itemParent]);
+			break;
+		case 'Enter':
+			if (item && !props.disabled && props.clickable)
+				emit('click:row', { item, event });
+			break;
+		case ' ':
+			if (item && props.showSelect !== 'none')
+				onItemSelected({ item, value: !getSelectedState(item) });
+			break;
+		default:
+			return;
+	}
+	event.preventDefault();
+	keyed.value = true;
+	if (!next)
+		return;
+	cursor.value = String(next[rowKey]);
+	void nextTick(() =>
+		tableRoot.value?.querySelector(`.table-row[data-key="${cursor.value!.replace(/["\\]/g, '\\$&')}"]`)?.scrollIntoView({ block: 'nearest' }),
+	);
+}
+
 
 const guidesById = computed(() => {
 	const guides = new Map<PrimaryKey, Guide[]>();
@@ -937,9 +1122,8 @@ function makeHint(item: Item): Hint | null {
 	}
 	if (!item[childrenKey]?.length || !rowFolded(item))
 		return null;
-	// Searching or filtering, what's inside is counted in matches: a smaller "12 below" would read as
-	// items gone
-	const wanted = props.matches ?? props.keep;
+	// Searching, what's inside is counted in matches, as they're what's being looked for
+	const wanted = props.searching ? props.matches ?? props.keep : null;
 	if (wanted) {
 		const inside = new Set<string>();
 		for (const key of item[childrenKey] as string[]) {
@@ -947,15 +1131,26 @@ function makeHint(item: Item): Hint | null {
 			if (wanted.has(node) && (!keepKeys.value || keepKeys.value.has(key)))
 				inside.add(node);
 		}
-		const them = inside.size === 1 ? 'it' : 'them';
-		return inside.size
-			? { text: `${inside.size} ${inside.size === 1 ? 'match' : 'matches'} below`, kind: 'matches', tip: `${inside.size} matching ${inside.size === 1 ? 'item' : 'items'} inside. Click to open the way to ${them}.` }
-			: null;
+		if (!inside.size)
+			return null;
+		const [them, items] = inside.size === 1 ? ['it', 'item'] : ['them', 'items'];
+		return { text: `${inside.size} ${inside.size === 1 ? 'match' : 'matches'} below`, kind: 'matches', tip: `${inside.size} matching ${items} inside. Click to open the way to ${them}.` };
 	}
-	const count = graph.descendantCount(item['--node']);
+	// Else what unfolding it would show: a filter's hiding the rest is its point, not news
+	const count = keepKeys.value || searchRoutes.value ? shownInside(item) : graph.descendantCount(item['--node']);
 	if (!count)
 		return null;
 	return { text: `${count} below`, kind: 'count', tip: `${count} distinct ${count === 1 ? 'item' : 'items'} inside, however many routes reach them. Click to unfold them all.` };
+}
+
+/** The distinct items inside a row that a filter leaves showing, however many routes reach them */
+function shownInside(item: Item) {
+	const nodes = new Set<string>();
+	for (const key of item[childrenKey] as string[]) {
+		if ((!keepKeys.value || keepKeys.value.has(key)) && (!searchRoutes.value || searchRoutes.value.keys.has(key)))
+			nodes.add(rowsByKey.value.get(key)?.['--node']);
+	}
+	return nodes.size;
 }
 
 type Hint = { text: string; kind: 'home' | 'loop' | 'count' | 'matches'; tip: string };
@@ -973,8 +1168,13 @@ function hintOf(item: Item) {
 	return hint;
 }
 
-/** The header's chevron: fold everything; all folded, unfold to the cap, or ⌘/Ctrl-clicked, all of it */
+/**
+ * The header's chevron: fold everything; all folded, unfold to the cap, or ⌘/Ctrl-clicked, all of it.
+ * ⌥/Alt-clicked, back to the depth the view starts at.
+ */
 function onFoldAll(event?: MouseEvent) {
+	if (event?.altKey)
+		return resetFolds();
 	if (!allFolded.value)
 		return setAllCollapsed(true);
 	const cap = event?.metaKey || event?.ctrlKey ? null : openCap.value;
@@ -983,9 +1183,16 @@ function onFoldAll(event?: MouseEvent) {
 		false,
 	);
 }
-const unfoldAllLabel = computed(() =>
-	openCap.value === null ? 'Unfold all' : `Unfold to ${openCap.value} levels\n${reachKeys.inside}-click: all of them`,
-);
+/** Folded rows that unfolding to the cap would leave shut: only then is there more for ⌘-click */
+const foldedPastCap = computed(() => openCap.value !== null && foldableItems.value.some((item) => (item[itemDepth] ?? 0) >= openCap.value!));
+const foldAllTip = computed(() => {
+	const lines = [!allFolded.value ? 'Fold all' : foldedPastCap.value ? `Unfold to ${openCap.value} levels` : 'Unfold all'];
+	if (allFolded.value && foldedPastCap.value)
+		lines.push(`${reachKeys.inside}-click: all of them`);
+	if (ownFolds.value)
+		lines.push(`${reachKeys.siblings}-click: ${props.openDepth == null ? 'unfold everything' : `fold to ${props.openDepth} ${props.openDepth === 1 ? 'level' : 'levels'}`}`);
+	return lines.join('\n');
+});
 
 /** Which way a click goes: the item's own way, or for everything inside, fold unless all are */
 function foldsWith(item: Item, reach: FoldReach | null, targets: PrimaryKey[]) {
@@ -1077,6 +1284,8 @@ function useTreeView({
 		initCollapsedChildren,
 		setAllCollapsed,
 		setCollapsed,
+		resetFolds,
+		ownFolds,
 	} = useCollapsible();
 
 	watch(() => props.items, initTreeView);
@@ -1104,6 +1313,8 @@ function useTreeView({
 		onSortUpdate,
 		setAllCollapsed,
 		setCollapsed,
+		resetFolds,
+		ownFolds,
 	};
 
 	function initTreeView() {
@@ -1261,6 +1472,9 @@ function useTreeView({
 			initCollapsedChildren,
 			setAllCollapsed,
 			setCollapsed,
+			// Back to the starting depth: every fold of your own forgotten
+			resetFolds: () => (folds.value = {}),
+			ownFolds: computed(() => Object.keys(folds.value).length > 0),
 		};
 
 		/** The item's own fold if you've set one, otherwise the starting depth's */
@@ -1339,10 +1553,14 @@ function useTreeView({
 	<div
 		ref="tableRoot"
 		class="v-table"
-		:class="{ loading, inline, disabled }"
+		:class="{ loading, inline, disabled, 'click-selects': clickSelects, keyed, 'alt-held': reachHeld === 'siblings' }"
 	>
+		<!-- Focused itself for the keyboard: Directus draws the wrapper as display: contents, which can't be -->
 		<table
+			ref="tableEl"
+			:tabindex="nesting ? 0 : undefined"
 			:summary="internalHeaders.map((header) => header.text).join(', ')"
+			@keydown="onTableKey"
 			:class="{
 				'tree-view': nesting,
 				'has-controls': columnStyleControlWidth > 0,
@@ -1371,7 +1589,7 @@ function useTreeView({
 				:tree-view="nesting"
 				:drawn-widths="drawnHeaderWidths"
 				:all-folded="allFolded"
-				:unfold-all-label="unfoldAllLabel"
+				:fold-all-tip="foldAllTip"
 				:can-fold-all="foldableItems.length > 1"
 				:hierarchy-available="!!graph"
 				@toggle-fold-all="onFoldAll"
@@ -1479,6 +1697,7 @@ function useTreeView({
 						:sorted-manually="sortIsManual || manualOrder"
 						:has-click-listener="!disabled && clickable"
 						@mouseover.prevent="onDragOver"
+						:class="arriving.has(item[rowKey]) ? 'arriving' : undefined"
 						:fold-target="foldTargets.has(item[rowKey])"
 						:guides="guidesById.get(item[rowKey])"
 						:divider-inset="guideJoins.insets.has(item[rowKey])"
@@ -1489,13 +1708,12 @@ function useTreeView({
 						:hint-column="hintColumn"
 						:duplicate="item['--full'] === false"
 						:cell-slots="slots"
+						:cursor="cursor === item[rowKey]"
+						:tools="cursor === item[rowKey] && (clickSelects || keyed)"
 						@toggle-children="onChevronClick(item, $event)"
 						@chevron-hover="onChevronHover(item, $event)"
-						@click="
-							!disabled && clickable
-								? $emit('click:row', { item, event: $event })
-								: null
-						"
+						@click="onRowClick(item, $event)"
+						@dblclick="onRowDoubleClick(item, $event)"
 						@item-selected="
 							onItemSelected({
 								item,
@@ -1699,8 +1917,51 @@ table.animate-folds :deep(.table-row.collapsed) {
 	opacity: 0;
 }
 
+/*
+ * The selected row: always in click-selects mode, otherwise once the keyboard (or Enter in the
+ * search) has moved it. A ring rather than a fill, as matches are filled and so is hover.
+ */
+/* The selected row shows where the keyboard is, so the table itself needs no focus ring. With its
+   class, to outweigh Directus's own ring, a selector made heavy with :not()s */
+table.tree-view:focus,
+table.tree-view:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+
+.v-table.click-selects :deep(.table-row.cursor),
+.v-table.keyed :deep(.table-row.cursor) {
+	position: relative;
+}
+
+.v-table.click-selects :deep(.table-row.cursor)::after,
+.v-table.keyed :deep(.table-row.cursor)::after {
+	content: '';
+	position: absolute;
+	inset: 1px 2px;
+	border: 2px solid var(--theme--primary);
+	border-radius: var(--theme--border-radius);
+	pointer-events: none;
+}
+
+/* Holding ⌥ where a click opens: the row a click would select instead, previewed. Not over a
+   chevron or handle, where ⌥-click folds the row and its siblings */
+.v-table.alt-held:not(.click-selects) :deep(.table-row:not(.cursor):hover:not(:has(.collapse-btn:hover, .drag-handle:hover))) {
+	position: relative;
+}
+
+.v-table.alt-held:not(.click-selects) :deep(.table-row:not(.cursor):hover:not(:has(.collapse-btn:hover, .drag-handle:hover)))::after {
+	content: '';
+	position: absolute;
+	inset: 1px 2px;
+	border: 2px solid var(--theme--primary);
+	border-radius: var(--theme--border-radius);
+	opacity: 0.45;
+	pointer-events: none;
+}
+
 @starting-style {
-	table.animate-folds.settled :deep(.table-row) {
+	table.animate-folds.settled :deep(.table-row.arriving) {
 		height: 0;
 		opacity: 0;
 	}

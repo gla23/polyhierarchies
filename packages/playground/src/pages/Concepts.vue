@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ExploreLink from '../components/ExploreLink.vue';
-import { concepts } from './concepts';
+import { conceptGroups, concepts } from './concepts';
 </script>
 
 <template>
@@ -11,23 +11,32 @@ import { concepts } from './concepts';
 			each UI in Explore handles it, and where it turns up out in the world. Every example links
 			straight to the same view in Explore.
 		</p>
-		<ul class="cards">
-			<li v-for="concept in concepts" :key="concept.id">
-				<ExploreLink :to="{ page: concept.id }">
-					<strong>{{ concept.title }}</strong>
-					<span>{{ concept.summary }}</span>
-				</ExploreLink>
-			</li>
-		</ul>
+		<section v-for="group in conceptGroups" :key="group.id">
+			<h2>{{ group.title }}</h2>
+			<p class="about">{{ group.about }}</p>
+			<ul class="cards">
+				<li v-for="concept in concepts.filter((each) => each.group === group.id)" :key="concept.id">
+					<ExploreLink :to="{ page: concept.id }">
+						<strong>{{ concept.title }}</strong>
+						<span>{{ concept.summary }}</span>
+					</ExploreLink>
+				</li>
+			</ul>
+		</section>
 	</article>
 </template>
 
 <style scoped>
+.about {
+	margin: 0;
+	color: var(--theme--foreground-subdued);
+}
+
 .cards {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
 	gap: 12px;
-	margin: 24px 0 0;
+	margin: 12px 0 0;
 	padding: 0;
 	list-style: none;
 }

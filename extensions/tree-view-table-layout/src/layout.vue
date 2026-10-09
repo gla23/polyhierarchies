@@ -1,7 +1,7 @@
 <!-- eslint-disable perfectionist/sort-named-imports -->
 <script setup lang="ts">
 import type { ShowSelect } from '@directus/extensions';
-import type { Field, Filter, Item } from '@directus/types';
+import type { Field, Filter, Item, PrimaryKey } from '@directus/types';
 import type { ComponentPublicInstance, Ref } from 'vue';
 // CORE CLONES
 import type { Component } from 'vue';
@@ -104,6 +104,8 @@ interface Props {
 	treeReadonly: boolean;
 	/** How highlights show, from the search's or the filter's mode */
 	highlightMode: 'routes' | 'inplace';
+	/** Searching, rather than only filtering: what the hints call the highlights */
+	searching: boolean;
 	/** Hide layers: only these nodes stay, with what holds their place */
 	keep: Set<string> | null;
 	/** Drawn as a tree, so loaded whole: no pages, and no page size to choose */
@@ -118,6 +120,23 @@ interface Props {
 	/** Which match the table last went to, for the top bar's button, and that button's asking */
 	setMatchPosition: (position: { at: number | null; of: number }) => void;
 	matchJump: { step: 1 | -1; n: number } | null;
+	/** What a click on a row does; in a picker a click always picks, as Directus has it */
+	rowClick: 'opens' | 'selects';
+	selectMode?: boolean;
+	setCursor: (row: Item | null) => void;
+	/** The links couldn't be read (no permission) or loaded */
+	linksError: 'forbidden' | 'failed' | null;
+	/** The selected row's actions, drawn after its name when a click selects */
+	cursorNode?: string | null;
+	cursorParent?: string | null;
+	canLink?: boolean;
+	canUnlink?: boolean;
+	canReparent?: boolean;
+	openCursor?: () => void;
+	pickerFilter?: (role: 'parent' | 'child' | 'reparent') => Filter | null;
+	linkCursor?: (role: 'parent' | 'child', picked: PrimaryKey[]) => Promise<void>;
+	unlinkCursor?: () => Promise<void>;
+	reparentCursor?: (parent: PrimaryKey | null) => Promise<void>;
 	isFiltered: boolean;
 }
 
@@ -133,6 +152,10 @@ provide(tableKitKey, {
 	ValueNull: resolveComponent('value-null') as Component,
 	vTooltip: resolveDirective('tooltip')!,
 	t: (key: string) => t(key),
+	// Directus keeps an empty holder in its menu outlet for every menu, filled while it's open
+	escapeTaken: () =>
+		!!document.querySelector('#dialog-outlet > *')
+		|| [...document.querySelectorAll('#menu-outlet > *')].some((menu) => menu.childElementCount > 0),
 });
 const { collection } = toRefs(props);
 
@@ -198,21 +221,47 @@ const limitWritable = useSync(props, 'limit', emit);
 
 const mainElement = inject<Ref<Element | undefined>>('main-element');
 
-const table = ref<ComponentPublicInstance & { goToMatch?: (step: 1 | -1) => void }>();
+const table = ref<ComponentPublicInstance & { goToMatch?: (step: 1 | -1) => void; focusTable?: () => void; pickCursor?: () => boolean; unfoldCursor?: () => void }>();
+
+/** Picking more parents or children for the selected row, or a taxonomy's new parent, in Directus's own drawer */
+const picking = ref<'parent' | 'child' | 'reparent' | null>(null);
+function onPicked(keys: PrimaryKey[]) {
+	const role = picking.value;
+	picking.value = null;
+	if (role === 'reparent') {
+		void props.reparentCursor?.(keys[0] ?? null);
+		return;
+	}
+	// Opened, so new children show as they land
+	if (role === 'child' && keys.length)
+		table.value?.unfoldCursor?.();
+	if (role)
+		void props.linkCursor?.(role, keys);
+}
+const named = (id: string | null | undefined) => (id ? props.nodeLabel(id) : '');
 const layoutRoot = ref<HTMLElement>();
 
-watch(() => props.matchJump, (jump) => jump && table.value?.goToMatch?.(jump.step));
+// The top bar's Next: go to the match and hand the table the keys, so the arrows carry on from it
+watch(() => props.matchJump, (jump) => {
+	if (!jump)
+		return;
+	table.value?.goToMatch?.(jump.step);
+	table.value?.focusTable?.();
+});
 
 /**
- * The search box Directus draws for this view: the drawer's, when picking items, else the page's,
- * but not while a drawer covers the page. Several drawers, only the top one's.
+ * The search box Directus draws for this view: the drawer's, when picking items, else the one in the
+ * page's header (not, say, a navigation's own search box), but not while a drawer covers the page.
+ * Several drawers, only the top one's. Only drawers showing count: a closed one can stay in the page.
  */
 function ownSearch() {
-	const drawers = [...document.querySelectorAll('.v-drawer')];
-	const drawer = layoutRoot.value?.closest('.v-drawer');
+	const drawers = [...document.querySelectorAll('.v-drawer')].filter((each) => each.getClientRects().length > 0);
+	const drawer = layoutRoot.value?.closest('.v-drawer') ?? null;
 	if (drawer ? drawer !== drawers.at(-1) : drawers.length)
 		return null;
-	return (drawer ?? document).querySelector<HTMLElement>('.search-input');
+	const boxes = [...(drawer ?? document).querySelectorAll<HTMLElement>('.search-input')]
+		.filter((box) => (box.closest('.v-drawer') ?? null) === drawer);
+	return boxes.find((box) => box.closest('.header-bar')) ?? boxes[0] ?? null;
 }
 
 /** Opened and focused with its text selected, as a find box is; folded away when empty, it opens on a click */
@@ -229,9 +278,10 @@ async function focusSearch(box: HTMLElement) {
 }
 
 /**
- * Enter in the search goes to the next match (Shift+Enter, the one before). ⌘/Ctrl-F focuses the
+ * Enter in the search goes to the next match (Shift+Enter, the one before) and selects it; Esc then
+ * leaves the search for the table, where the arrow keys carry on from it. ⌘/Ctrl-F focuses the
  * search, as the browser's find can't see the rows drawn without their cells; pressed again from the
- * search, it's the browser's.
+ * search, it's the browser's. Picking items, ⌘/Ctrl+Enter takes the selected row and saves.
  */
 let pendingStep: 1 | -1 | null = null;
 let pendingGiveUp: ReturnType<typeof setTimeout> | undefined;
@@ -240,7 +290,19 @@ function onKeydown(event: KeyboardEvent) {
 	const input = box?.querySelector('input');
 	if (!box || !input)
 		return;
-	if (event.key === 'Enter' && event.target === input && !event.isComposing) {
+	if (props.selectMode && event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.isComposing) {
+		const save = layoutRoot.value?.closest('.v-drawer')?.querySelector<HTMLElement>('.header-bar .header-button:not(.close-button) button');
+		if (!save)
+			return;
+		event.preventDefault();
+		event.stopPropagation();
+		// Nothing selected or ticked, nothing's saved: in a taxonomy that would move the item to the top
+		if (table.value?.pickCursor?.() || props.selection?.length)
+			void nextTick(() => save.click());
+		return;
+	}
+	// With nothing in the search there's nothing to go to: Enter is left alone
+	if (event.key === 'Enter' && event.target === input && !event.isComposing && input.value.trim()) {
 		event.preventDefault();
 		const step = event.shiftKey ? -1 : 1;
 		// Typed faster than the search follows: go once its matches arrive
@@ -252,6 +314,14 @@ function onKeydown(event: KeyboardEvent) {
 		else {
 			table.value?.goToMatch?.(step);
 		}
+	}
+	else if (event.key === 'Escape' && event.target === input && table.value?.focusTable) {
+		event.preventDefault();
+		// Or the drawer's Esc would close it, rather than go one step back
+		if (layoutRoot.value?.closest('.v-drawer'))
+			event.stopPropagation();
+		input.blur();
+		table.value.focusTable();
 	}
 	else if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f') {
 		if (document.activeElement === input)
@@ -270,9 +340,13 @@ watch([() => props.matches, () => props.keep], async () => {
 });
 
 onMounted(() => {
-	document.addEventListener('keydown', onKeydown);
-	// Opened to pick items: ready to type into, once the drawer has slid in
+	// Capturing on the window, before anything on the way down can keep the key to itself
+	window.addEventListener('keydown', onKeydown, true);
+	// Opened to pick items: ready to type into, once the drawer has slid in. Directus starts a drawer
+	// from the collection's saved view, last search and all: the filter is worth keeping, but the
+	// search was for something else
 	if (layoutRoot.value?.closest('.v-drawer')) {
+		ownSearch()?.querySelector<HTMLElement>('.icon-clear')?.click();
 		setTimeout(() => {
 			const box = ownSearch();
 			if (box)
@@ -280,7 +354,7 @@ onMounted(() => {
 		}, 250);
 	}
 });
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true));
 
 watch(
 	() => props.page,
@@ -331,6 +405,18 @@ function removeField(fieldKey: string) {
 		class="custom-layout"
 	>
 		<v-notice
+			v-if="linksError"
+			class="hierarchy-hint"
+			type="warning"
+		>
+			<template v-if="linksError === 'forbidden'">
+				Your role can't read {{ junction }}, where this view's links are kept, so every item is shown at the top level. An admin can give your role read access to it.
+			</template>
+			<template v-else>
+				The links in {{ junction }} couldn't be loaded, so every item is shown at the top level.
+			</template>
+		</v-notice>
+		<v-notice
 			v-if="hierarchyHint"
 			class="hierarchy-hint"
 			type="info"
@@ -370,17 +456,20 @@ function removeField(fieldKey: string) {
 			:matches
 			:readonly="treeReadonly"
 			:search-mode="highlightMode"
+			:searching
 			:keep
 			:collection
 			:tree-column="treeColumn === '$controls' ? null : treeColumn"
 			:show-guides="showGuides"
 			:open-depth="openDepth == null || openDepth < 0 ? null : openDepth"
 			:max-open-depth="maxOpenDepth"
+			:click-selects="rowClick === 'selects' && !selectMode"
 			@click:row="onRowClick"
 			@update:sort="onSortChange"
 			@update:items="saveEdits"
 			@showing="setShowing"
 			@match-position="setMatchPosition"
+			@cursor="setCursor"
 		>
 			<template
 				v-for="header in tableHeaders"
@@ -397,6 +486,64 @@ function removeField(fieldKey: string) {
 					:collection="header.field.collection"
 					:field="header.field.field"
 				/>
+			</template>
+
+			<!-- Not while picking items: a click there picks -->
+			<template
+				v-if="!selectMode"
+				#row-tools
+			>
+				<!-- Only where a click selects: elsewhere a click already opens -->
+				<v-button
+					v-if="rowClick === 'selects'"
+					v-tooltip.bottom="`Open ${named(cursorNode)}, as a double-click or Enter does`"
+					x-small
+					icon
+					secondary
+					@click="openCursor"
+				>
+					<v-icon name="open_in_new" x-small />
+				</v-button>
+				<v-button
+					v-if="canReparent"
+					v-tooltip.bottom="`Reparent ${named(cursorNode)}: pick its new parent, or save with none picked to move it to the top level`"
+					x-small
+					icon
+					secondary
+					@click="picking = 'reparent'"
+				>
+					<v-icon name="drive_file_move" x-small />
+				</v-button>
+				<template v-if="canLink">
+					<v-button
+						v-tooltip.bottom="`Add a parent: pick items for ${named(cursorNode)} to go under as well`"
+						x-small
+						icon
+						secondary
+						@click="picking = 'parent'"
+					>
+						<v-icon name="add_row_above" x-small />
+					</v-button>
+					<v-button
+						v-tooltip.bottom="`Add children: pick items to go inside ${named(cursorNode)} as well as where they are`"
+						x-small
+						icon
+						secondary
+						@click="picking = 'child'"
+					>
+						<v-icon name="add_row_below" x-small />
+					</v-button>
+				</template>
+				<v-button
+					v-if="canUnlink && cursorParent"
+					v-tooltip.bottom="`Take ${named(cursorNode)} out of ${named(cursorParent)}. It stays under any other parents, and at the top level if this was its only one`"
+					x-small
+					icon
+					secondary
+					@click="unlinkCursor"
+				>
+					<v-icon name="link_off" x-small />
+				</v-button>
 			</template>
 
 			<template #header-context-menu="{ header }">
@@ -546,6 +693,16 @@ function removeField(fieldKey: string) {
 				</div>
 			</template>
 		</CustomVTable>
+		<drawer-collection
+			v-if="picking"
+			active
+			:collection="collection"
+			:multiple="picking !== 'reparent'"
+			:selection="[]"
+			:filter="pickerFilter?.(picking) ?? undefined"
+			@input="onPicked"
+			@update:active="picking = null"
+		/>
 
 		<slot
 			v-else-if="error"

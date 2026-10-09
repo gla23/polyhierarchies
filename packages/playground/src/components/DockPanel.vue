@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
  * One of Explore's side panels: a title, two ways of closing, and an edge to drag for its width.
- * Tucked away, it comes back for something new to explain (another UI, other data); closed, it
- * stays closed until it's opened from its button.
+ * Closed, it comes back for something new to explain (another UI, other data); hidden, it stays
+ * away until it's opened from its button.
  */
 const props = defineProps<{ title: string; width: number; reopensFor: string }>();
 const emit = defineEmits<{ close: [reopen: boolean]; resize: [width: number] }>();
@@ -49,18 +49,20 @@ function nudge(event: KeyboardEvent) {
 			<button
 				type="button"
 				class="dock-button"
-				:title="`Tuck away: it comes back when you pick ${reopensFor}`"
-				:aria-label="`Tuck ${title} away`"
-				@click="emit('close', true)"
+				title="Hide for good: it won't open by itself again, only from its button"
+				:aria-label="`Hide ${title} for good`"
+				@click="emit('close', false)"
 			>
-				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg>
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<path d="M3 3l18 18M10.6 5.1A9.8 9.8 0 0 1 12 5c5 0 8.6 4 9.5 7a10.7 10.7 0 0 1-2.4 3.6M6.4 6.4A10.8 10.8 0 0 0 2.5 12c.9 3 4.5 7 9.5 7a9.6 9.6 0 0 0 5.3-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+				</svg>
 			</button>
 			<button
 				type="button"
 				class="dock-button"
-				title="Close: it stays closed until you open it from its button"
+				:title="`Close: it opens again when you pick ${reopensFor}`"
 				:aria-label="`Close ${title}`"
-				@click="emit('close', false)"
+				@click="emit('close', true)"
 			>
 				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
 			</button>
@@ -156,6 +158,7 @@ h2 {
 @media (max-width: 800px) {
 	.dock-panel {
 		flex-basis: auto !important;
+		order: 2;
 		border-left: none;
 		border-top: var(--theme--border-width) solid var(--theme--border-color);
 	}

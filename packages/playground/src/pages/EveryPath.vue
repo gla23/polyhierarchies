@@ -123,13 +123,13 @@ function pickExample(example: (typeof examples)[number]) {
 				<a href="https://www.ebi.ac.uk/QuickGO/">QuickGO</a>, whose ancestor chart draws every path
 				up to the root at once (the Layered DAG's <em>Ancestors only</em> scope here), and
 				<a href="https://www.ebi.ac.uk/ols4/">OLS</a>, whose tree repeats a term under each parent
-				and marks it — the Outline's duplicates.
+				and marks it — the Tree lab's duplicates.
 			</li>
 			<li>
 				<strong>Zotero</strong> keeps an item in several collections: select it and hold ⌥ or Ctrl, and
 				every collection containing it lights up
 				(<a href="https://www.zotero.org/support/kb/collections_containing_an_item">how</a>). Hold Alt
-				in the Outline, Tree table or Miller columns here for the same.
+				in the Tree lab, Tree table or Miller columns here for the same.
 			</li>
 			<li>
 				<strong>Wikipedia</strong> files an article in as many categories as apply, and categories sit

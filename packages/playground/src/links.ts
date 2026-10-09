@@ -18,7 +18,7 @@ export interface PlaygroundState {
 /** The address for a state of the playground: what the pages link to and the address bar shows */
 export function playgroundHref(state: PlaygroundState) {
 	const query = new URLSearchParams();
-	if (state.page && state.page !== 'explore') query.set('page', state.page);
+	if (state.page && state.page !== 'explore' && state.page !== 'intro') query.set('page', state.page);
 	if (state.data) query.set('data', state.data);
 	if (state.ui) query.set('ui', state.ui);
 	if (state.focus) query.set('focus', state.focus);

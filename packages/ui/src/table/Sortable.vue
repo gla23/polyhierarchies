@@ -206,7 +206,8 @@ function useSortable({
 	}
 
 	function onDragOver(id: ItemID) {
-		if (!draggedItemId.value || draggedItemId.value === id)
+		// Its own rows move with it, so they're under the pointer often, and never a place to go
+		if (!draggedItemId.value || draggedItemId.value === id || draggedChildrenSet.value.has(id))
 			return;
 
 		const draggingIndex = items.value.findIndex(
@@ -230,7 +231,10 @@ function useSortable({
 				1 + draggedChildrenCount.value,
 			);
 
-			items.value.splice(dragOverIndex, 0, ...itemsToMove);
+			// Going down it lands just after the row, which moved up by as many rows as it took out:
+			// at the row's old index it would land that many rows further, folded ones and all
+			const to = dragOverIndex > draggingIndex ? dragOverIndex - itemsToMove.length + 1 : dragOverIndex;
+			items.value.splice(to, 0, ...itemsToMove);
 		}
 	}
 

@@ -25,6 +25,7 @@ import {
 	watch,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 import Actions from './actions.vue';
 // CORE IMPORTS
 import { useAliasFields } from './core-clones/composables/use-alias-fields';
@@ -34,6 +35,7 @@ import { formatItemsCountPaginated, formatItemsCountRelative } from './core-clon
 import { getDefaultDisplayForType } from './core-clones/utils/get-default-display-for-type';
 import { hideDragImage } from './core-clones/utils/hide-drag-image';
 import { saveAsCSV } from './core-clones/utils/save-as-csv';
+import { getItemRoute } from './core-clones/utils/get-route';
 import { syncRefProperty } from './core-clones/utils/sync-ref-property';
 import Layout from './layout.vue';
 import Options from './options.vue';
@@ -97,17 +99,26 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		const junction = withDefault(syncRefProperty(layoutOptions, 'junction', undefined), defaults.junction);
 		const junctionParent = withDefault(syncRefProperty(layoutOptions, 'junctionParent', undefined), computed(() => defaults.ends(junction.value).parent));
 		const junctionChild = withDefault(syncRefProperty(layoutOptions, 'junctionChild', undefined), computed(() => defaults.ends(junction.value).child));
-		const junctionSort = withDefault(syncRefProperty(layoutOptions, 'junctionSort', undefined), computed(() => defaults.sortOf(junction.value)));
+		const junctionSortChoice = withDefault(syncRefProperty(layoutOptions, 'junctionSort', undefined), computed(() => defaults.sortOf(junction.value)));
+		// Stored as `$none` when chosen, as null means unset, which would bring the schema's guess back
+		const junctionSort = computed(() => (junctionSortChoice.value === '$none' ? null : junctionSortChoice.value));
 		const treeColumn = withDefault(syncRefProperty(layoutOptions, 'treeColumn', undefined), defaults.treeColumn);
 		const showGuides = syncRefProperty(layoutOptions, 'showGuides', true);
 		// Filters usually exclude (archived, say); searches usually look for something
 		const filterMode = syncRefProperty(layoutOptions, 'filterMode', 'hide');
-		const searchMode = syncRefProperty(layoutOptions, 'searchMode', 'routes');
+		const searchModeStored = syncRefProperty(layoutOptions, 'searchMode', 'routes');
+		// A search shows its routes or keeps the folds. Hiding is what a filter does, and turning a search
+		// off is just clearing it, so a view that stored either (they were offered once) shows routes
+		const searchMode = computed<'routes' | 'inplace'>({
+			get: () => (searchModeStored.value === 'inplace' ? 'inplace' : 'routes'),
+			set: (value) => (searchModeStored.value = value),
+		});
 		const modeMenus = syncRefProperty(layoutOptions, 'modeMenus', true);
 		// Two levels unless a view says otherwise: the shape, without hundreds of rows. -1 is all.
 		const openDepth = syncRefProperty(layoutOptions, 'openDepth', 2);
 		// Deeper, the indent pushes every column after the tree column off screen
 		const maxOpenDepth = syncRefProperty(layoutOptions, 'maxOpenDepth', 5);
+		const rowClick = syncRefProperty(layoutOptions, 'rowClick', 'opens');
 
 		const { onClick } = useLayoutClickHandler({
 			props,
@@ -169,16 +180,18 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			const roots = graph.value?.roots.length ?? 0;
 			const tops = graph.value ? `, ${roots} ${roots === 1 ? 'root' : 'roots'}` : '';
 			// Searching or filtering a tree: the items it shows, which the table counts, and how many match
+			// when that's some but not all of them
 			if (showing.value) {
 				const { items: shown, matching } = showing.value;
-				return `${formatItemsCountPaginated({
+				const counted = formatItemsCountPaginated({
 					currentItems: shown,
 					currentPage: 1,
 					perPage: shown,
 					isFiltered: true,
 					totalItems: totalCount.value,
 					i18n,
-				})}, ${matching} matching`;
+				});
+				return offerNext.value ? `${counted}, ${matching} ${searching.value ? 'matching' : 'pass the filter'}` : counted;
 			}
 			return formatItemsCountPaginated({
 				currentItems: itemCount.value,
@@ -201,8 +214,15 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			const by = tableSort.value?.by;
 			return !!by && by !== sortField.value && by !== primaryKeyField.value?.field;
 		});
-		const { matches, keep, highlightMode } = useSearchMatches();
+		const { matches, keep, highlightMode, searching } = useSearchMatches();
 		const showing = ref<{ items: number; matching: number } | null>(null);
+		/**
+		 * Highlights that stand out, some of what's shown but not all of it: only then is there a next
+		 * one to go to, or a count of them worth giving. A filter that hides leaves only what passes.
+		 */
+		const offerNext = computed(() =>
+			!!matches.value && !!showing.value && showing.value.matching > 0 && showing.value.matching < showing.value.items,
+		);
 		/**
 		 * Going to the next match: the table knows the matches' order and opens the way, so the top
 		 * bar's button asks it through the layout, and hears back which one it's at
@@ -211,9 +231,10 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		const matchJump = ref<{ step: 1 | -1; n: number } | null>(null);
 		const goToMatch = (step: 1 | -1 = 1) => (matchJump.value = { step, n: (matchJump.value?.n ?? 0) + 1 });
 
-		const { links, linksActive, linkKey, loadLinks } = useJunction();
+		const { links, linksActive, linkKey, loadLinks, linksError } = useJunction();
 		const { saveEdits, shownItems } = useSaveEdits();
 		const { graph, nodeLabel } = useHierarchyGraph();
+		const rowActions = useRowActions();
 
 		return {
 			tableHeaders,
@@ -240,7 +261,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			junction,
 			junctionParent,
 			junctionChild,
-			junctionSort,
+			junctionSort: junctionSortChoice,
 			graph,
 			manualOrder: computed(() => linksActive.value && !columnSorted.value),
 			matches,
@@ -252,6 +273,8 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			filterMode,
 			modeMenus,
 			highlightMode,
+			searching,
+			offerNext,
 			setShowing: (counts: { items: number; matching: number } | null) => (showing.value = counts),
 			keep,
 			matchPosition,
@@ -264,6 +287,9 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			showGuides,
 			openDepth,
 			maxOpenDepth,
+			rowClick,
+			linksError,
+			...rowActions,
 			primaryKeyField,
 			info,
 			showingCount,
@@ -343,6 +369,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 
 			const treeColumn = computed(() => {
 				const shown = fields.value;
+				const interfaceOf = (key: string) => (fieldsStore.getField(collection.value!, key) as Field | null)?.meta?.interface ?? '';
 				const textual = (key: string) => {
 					const field: Field | null = fieldsStore.getField(collection.value!, key);
 					return !!field
@@ -350,11 +377,16 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 						&& !['select-color', 'select-icon', 'tab-icon-picker'].includes(field.meta?.interface ?? '')
 						&& !field.meta?.special?.includes('uuid');
 				};
-				// The template's first text field: `{{icon}} {{colour}} {{name}}` means name
-				const named = [...(info.value?.meta?.display_template ?? '').matchAll(/\{\{\s*(\w+)/g)]
-					.map((match) => match[1]!)
-					.find((key) => shown.includes(key) && textual(key));
-				return named ?? shown.find(textual) ?? shown[0] ?? '$controls';
+				// The template's text fields first: `{{icon}} {{colour}} {{name}}` means name
+				const templated = [...(info.value?.meta?.display_template ?? '').matchAll(/\{\{\s*(\w+)/g)].map((match) => match[1]!);
+				const texts = [...new Set([...templated, ...shown])].filter((key) => shown.includes(key) && textual(key));
+				// A field called name or title wins; then text typed in, before text picked from a short
+				// list of choices (a dropdown's values are categories, rarely what an item is called)
+				return texts.find((key) => /^(name|title)$/i.test(key))
+					?? texts.find((key) => !interfaceOf(key).startsWith('select-'))
+					?? texts[0]
+					?? shown[0]
+					?? '$controls';
 			});
 
 			return { parent, hierarchy, junction, ends, sortOf, treeColumn };
@@ -730,24 +762,30 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				() => hierarchy.value === 'polyhierarchy' && !!junction.value && !!junctionParent.value && !!junctionChild.value,
 			);
 
+			/** Why the links couldn't be had, so the layout can say so rather than draw every item at the top */
+			const linksError = ref<'forbidden' | 'failed' | null>(null);
+
 			async function loadLinks() {
 				if (!linksActive.value) {
 					links.value = [];
+					linksError.value = null;
 					return;
 				}
 				try {
 					const fields = [linkKey.value, junctionParent.value, junctionChild.value, junctionSort.value].filter(Boolean);
 					const response = await api.get(getEndpoint(junction.value!), { params: { fields, limit: -1 } });
-					links.value = response.data.data;
+					links.value = response.data.data ?? [];
+					linksError.value = null;
 				}
-				catch {
+				catch (error: any) {
 					links.value = [];
+					linksError.value = error?.response?.status === 403 ? 'forbidden' : 'failed';
 				}
 			}
 
 			watch([linksActive, junction, junctionParent, junctionChild, junctionSort], loadLinks, { immediate: true });
 
-			return { links, linksActive, linkKey, loadLinks };
+			return { links, linksActive, linkKey, loadLinks, linksError };
 		}
 
 		/**
@@ -779,20 +817,159 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				return null;
 			});
 
-			/** An item as the collection's display template names it, for hints like "in Fruit" */
+			/**
+			 * An item's name, for hints like "in Fruit": its text in the tree column, as its own row shows
+			 * it; else the collection's display template, if every field it names was loaded (only the
+			 * shown columns are); else a name, title or label; else the id. The template comes second as
+			 * it fills in an icon or colour as its raw value: `{{icon}} {{name}}` reads "folder Fruit".
+			 */
 			const itemsById = computed(() => new Map(shownItems.value.map((item) => [String(item[primaryKeyField.value?.field ?? 'id']), item])));
+			const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
 			function nodeLabel(id: string) {
 				const item = itemsById.value.get(id);
 				if (!item)
 					return id;
-				const template = info.value?.meta?.display_template;
-				const named = template
-					? template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_: string, path: string) => String(path.split('.').reduce((value: any, part: string) => value?.[part], item) ?? '')).trim()
-					: '';
-				return named || id;
+				let loaded = true;
+				const templated = (info.value?.meta?.display_template ?? '').replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_: string, path: string) => {
+					const value = path.split('.').reduce((at: any, part: string) => at?.[part], item);
+					if (value === undefined)
+						loaded = false;
+					return String(value ?? '');
+				});
+				return text(item[treeColumn.value])
+					?? (loaded ? text(templated) : null)
+					?? text(item.name) ?? text(item.title) ?? text(item.label)
+					?? id;
 			}
 
 			return { graph, nodeLabel };
+		}
+
+		/**
+		 * The table's selected row, and what's offered for it after its name: open it (when a click
+		 * selects), and in a polyhierarchy give it more parents or children, picked in Directus's own
+		 * drawer, or take it out of the parent it's shown under; in a taxonomy, give it a new parent.
+		 */
+		function useRowActions() {
+			const api = useApi();
+			const router = useRouter();
+			const { usePermissionsStore, useUserStore, useNotificationsStore } = system.stores;
+			const permissions = usePermissionsStore();
+			const user = useUserStore();
+
+			const cursor = ref<Item | null>(null);
+			const setCursor = (row: Item | null) => (cursor.value = row);
+			const cursorNode = computed(() => (cursor.value?.['--node'] as string | undefined) ?? null);
+			/** The node it's shown under here: a placement's key is its route */
+			const cursorParent = computed(() => String(cursor.value?.['--key'] ?? '').split('/').at(-2) ?? null);
+			const allowed = (action: 'create' | 'delete') =>
+				computed(() => linksActive.value && (user.isAdmin || !!permissions.getPermission(junction.value, action)));
+			const canLink = allowed('create');
+			const canUnlink = allowed('delete');
+			const canReparent = computed(() => {
+				if (linksActive.value || !parentField.value || !collection.value)
+					return false;
+				if (user.isAdmin)
+					return true;
+				const fields = permissions.getPermission(collection.value, 'update')?.fields;
+				return !!fields && (fields.includes('*') || fields.includes(parentField.value));
+			});
+
+			/** The item's own primary key, as the graph's ids are strings */
+			function keyOf(id: string) {
+				const pk = primaryKeyField.value?.field;
+				return (pk ? shownItems.value.find((item) => String(item[pk]) === id)?.[pk] : undefined) ?? id;
+			}
+
+			function openCursor() {
+				if (cursorNode.value)
+					router.push(getItemRoute(collection.value!, keyOf(cursorNode.value)));
+			}
+
+			/**
+			 * For the picker: the item itself, and what it's already linked to that way. Reparenting a
+			 * taxonomy, everything inside it too, as a branch can't go under itself.
+			 */
+			function pickerFilter(role: 'parent' | 'child' | 'reparent'): Filter | null {
+				const pk = primaryKeyField.value?.field;
+				const node = cursorNode.value;
+				if (!pk || !node)
+					return null;
+				if (role === 'reparent') {
+					const inside = graph.value?.descendants(node).flat() ?? [];
+					return { [pk]: { _nin: [node, ...inside].map(keyOf) } } as Filter;
+				}
+				const [mine, theirs] = role === 'parent' ? [junctionChild.value!, junctionParent.value!] : [junctionParent.value!, junctionChild.value!];
+				const linked = links.value.filter((link) => String(link[mine]) === node).map((link) => link[theirs]);
+				return { [pk]: { _nin: [keyOf(node), ...linked] } } as Filter;
+			}
+
+			/** New links, each at the end of its parent's children */
+			async function linkCursor(role: 'parent' | 'child', picked: PrimaryKey[]) {
+				const node = cursorNode.value;
+				if (!node || !picked.length)
+					return;
+				const [parentField, childField, sortField] = [junctionParent.value!, junctionChild.value!, junctionSort.value];
+				const lastSort = new Map<string, number>();
+				for (const link of links.value) {
+					if (sortField && typeof link[sortField] === 'number')
+						lastSort.set(String(link[parentField]), Math.max(lastSort.get(String(link[parentField])) ?? 0, link[sortField]));
+				}
+				const rows = picked.map((other) => {
+					const [parent, child] = role === 'parent' ? [other, keyOf(node)] : [keyOf(node), other];
+					const row: Item = { [parentField]: parent, [childField]: child };
+					if (sortField) {
+						const next = (lastSort.get(String(parent)) ?? 0) + 1;
+						lastSort.set(String(parent), next);
+						row[sortField] = next;
+					}
+					return row;
+				});
+				try {
+					await api.post(getEndpoint(junction.value!), rows);
+				}
+				catch (error) {
+					failed(error);
+				}
+				await loadLinks();
+			}
+
+			/** A taxonomy's one parent, set afresh; none picked, the top level */
+			async function reparentCursor(parent: PrimaryKey | null) {
+				const node = cursorNode.value;
+				if (!node || !parentField.value)
+					return;
+				try {
+					await api.patch(`${getEndpoint(collection.value!)}/${keyOf(node)}`, { [parentField.value]: parent });
+				}
+				catch (error) {
+					failed(error);
+				}
+				refresh();
+			}
+
+			async function unlinkCursor() {
+				const [node, parent] = [cursorNode.value, cursorParent.value];
+				const link = links.value.find((row) => String(row[junctionParent.value!]) === parent && String(row[junctionChild.value!]) === node);
+				if (!link)
+					return;
+				try {
+					await api.delete(`${getEndpoint(junction.value!)}/${link[linkKey.value]}`);
+				}
+				catch (error) {
+					failed(error);
+				}
+				await loadLinks();
+			}
+
+			function failed(error: any) {
+				useNotificationsStore().add({
+					title: error?.response?.data?.errors?.[0]?.message ?? 'The links couldn\'t be saved',
+					type: 'error',
+				});
+			}
+
+			return { cursor, setCursor, cursorNode, cursorParent, canLink, canUnlink, canReparent, openCursor, pickerFilter, linkCursor, unlinkCursor, reparentCursor };
 		}
 
 		function useFilteringTreeView({
@@ -849,7 +1026,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				try {
 					const [filtered, searched] = await Promise.all([
 						filterUser.value && filterMode.value !== 'off' ? idsWith({ filter: filter.value }, pk) : null,
-						search.value && searchMode.value !== 'off' ? idsWith({ search: search.value }, pk) : null,
+						search.value ? idsWith({ search: search.value }, pk) : null,
 					]);
 					// A newer search may have finished first
 					if (ask === asked) {
@@ -863,28 +1040,25 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				}
 			}
 			// A mode turned off and on again fetches afresh, as nothing was kept while it was off
-			watch([treeActive, filter, filterUser, search, () => filterMode.value === 'off', () => searchMode.value === 'off'], find, { immediate: true, deep: true });
+			watch([treeActive, filter, filterUser, search, () => filterMode.value === 'off'], find, { immediate: true, deep: true });
 
 			const both = (sets: (Set<string> | null)[]) => {
 				const present = sets.filter((set): set is Set<string> => !!set);
 				return present.length ? new Set([...present[0]!].filter((id) => present.every((set) => set.has(id)))) : null;
 			};
-			const keep = computed(() => both([
-				filterMode.value === 'hide' ? filterSet.value : null,
-				searchMode.value === 'hide' ? searchSet.value : null,
-			]));
+			const keep = computed(() => (filterMode.value === 'hide' ? filterSet.value : null));
 			const highlights = (mode: LayerMode) => mode === 'routes' || mode === 'inplace';
 			const matches = computed(() => both([
 				highlights(filterMode.value) ? filterSet.value : null,
-				highlights(searchMode.value) ? searchSet.value : null,
+				searchSet.value,
 			]));
-			// The search's way of highlighting if it highlights, else the filter's
+			// The search's way of highlighting when searching, else the filter's
 			const highlightMode = computed<'routes' | 'inplace'>(() =>
-				searchSet.value && highlights(searchMode.value)
-					? (searchMode.value as 'routes' | 'inplace')
-					: filterMode.value === 'inplace' ? 'inplace' : 'routes',
+				searchSet.value ? searchMode.value : filterMode.value === 'inplace' ? 'inplace' : 'routes',
 			);
-			return { matches, keep, highlightMode };
+			// Searching rather than only filtering: what the hints and the count call the highlights
+			const searching = computed(() => !!searchSet.value);
+			return { matches, keep, highlightMode, searching };
 		}
 
 		function useSaveEdits() {

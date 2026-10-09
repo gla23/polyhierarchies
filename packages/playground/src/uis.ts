@@ -15,6 +15,8 @@ export interface OptionDef {
 	key: string;
 	label: string;
 	about: string;
+	/** A heading it sits under, when a UI has enough options to need them */
+	group?: string;
 	type: 'number' | 'choice';
 	default: number | string;
 	min?: number;
@@ -45,7 +47,8 @@ const density: OptionDef = {
 		{ value: 'cosy', label: 'Cosy' },
 		{ value: 'comfortable', label: 'Comfortable' }
 	],
-	about: "Directus's three row sizes. Every UI spaces its nodes and rows from the same setting."
+	about: "Directus's three row sizes. Every UI here spaces its rows and nodes from this one setting.",
+	group: 'Rows'
 };
 
 const repeat: OptionDef = {
@@ -58,7 +61,8 @@ const repeat: OptionDef = {
 		{ value: 'mirror', label: 'Mirrors' }
 	],
 	about:
-		"Terminal duplicates draw a node in full once and point there from everywhere else, as ontology browsers mark repeated entries. Mirrors draw it in full everywhere, live copies as in Workflowy, so its children turn up under every parent (⇄ marks one) — until a node would repeat inside its own path, where it stops as a loop."
+		'How a node with several parents appears under each of them. Terminal duplicates draw it in full under one parent and as a single row pointing there under the others, as ontology browsers do. Mirrors draw it in full under every parent, like live copies in Workflowy, marked with ⇄. Either way, a node that would turn up inside its own branch is drawn once more as a loop, and stops there.',
+	group: 'Several parents'
 };
 
 const motion: OptionDef = {
@@ -72,7 +76,8 @@ const motion: OptionDef = {
 		{ value: 'off', label: 'Off' }
 	],
 	about:
-		'Auto animates until there are too many things moving to stay smooth — a few hundred rows, a crowded plex, a big graph — then just swaps. On forces it, to see the cost; off stops it.'
+		'Auto animates until too many things are moving to stay smooth, then simply swaps. On always animates, so you can see the cost; Off never does.',
+	group: 'Rows'
 };
 
 export const uis: UiEntry[] = [
@@ -84,13 +89,12 @@ export const uis: UiEntry[] = [
 		about: [
 			"The Directus tree view layout itself: the same component the extension draws in the admin, given this dataset instead of a collection. Only a checkbox, an icon, a menu and a tooltip are stand-ins here; the rest is the extension's own markup and styles, so what you see is what Directus shows.",
 			'It draws placements rather than items: a node with two parents is two rows, in full where it is first reached and a dimmed duplicate everywhere else, which is what lets one table show a taxonomy (one parent each) and a polyhierarchy alike. One column is the tree column, usually the name: it and every column before it move right with each level while it gives up the same width, so every column after it stays in one straight line. It\'s chosen by column rather than counted, so it stays with the name however the columns are dragged about, and the hints go in it.',
-			"Folding works as in the layout: ⌘/Ctrl-click a chevron for everything inside, ⌥/Alt-click for it and its siblings, and the folds you make are remembered in this browser. Searching keeps the tree, three ways (see While searching), the count says how many items it shows and how many of those match, Enter goes to the next match (opening the way to it), and rows can still be dragged. Hovering a row lights its other placements, and the hints act when clicked: \"12 below\" opens the branch, \"in Fruit\" goes to the full placement, \"above\" to the loop's ancestor; each says what it means on hover. What Directus can't do — parent counts, hover echoes, buttons on each row — is in the Tree lab."
+			"Folding works as in the layout: ⌘/Ctrl-click a chevron for everything inside, ⌥/Alt-click for it and its siblings, and the folds you make are remembered in this browser. Searching keeps the tree, three ways (see While searching), the count says how many items it shows and how many of those match, Enter goes to the next match (opening the way to it), and rows can still be dragged. Hovering a row lights its other placements, and the hints act when clicked: \"12 below\" opens the branch, \"in …\" goes to the full placement, \"above\" to the loop's ancestor; each says what it means on hover. What Directus can't do — parent counts, hover echoes, buttons on each row — is in the Tree lab."
 		],
 		editing:
 			'Drag a row by its chevron or handle: up and down to reorder, right to put it inside the row above, left to take it out. Hold Alt as you drop to add a parent instead of moving it, as the Directus layout does in its polyhierarchy mode. Click a row to open it, as Directus opens the item page.',
 		options: [
-			{ ...density, default: 'compact', about: "Directus's three row sizes; compact by default, as in the layout, so more of a tree fits." },
-			repeat,
+			{ ...density, default: 'compact', about: "Directus's three row sizes. Compact is the layout's default, so more of the tree fits on screen." },
 			{
 				key: 'treeColumn',
 				label: 'Tree column',
@@ -101,20 +105,8 @@ export const uis: UiEntry[] = [
 					{ value: 'controls', label: 'None: only the controls' }
 				],
 				about:
-					"The column the hierarchy indents: it and every column before it move right with each level, and it gives up the same width so every column after it stays in one straight line. Chosen by column, not counted, so it stays with the name however the columns are reordered; hints like \"in Fruit\" and \"12 below\" go in it too, as it's the one with room. None is Directus's own behaviour: only the controls indent."
-			},
-			{
-				key: 'searchMode',
-				label: 'While searching',
-				type: 'choice',
-				default: 'routes',
-				choices: [
-					{ value: 'hide', label: 'Hide what doesn\'t match' },
-					{ value: 'routes', label: 'Show the routes to the matches' },
-					{ value: 'inplace', label: 'Keep my folds' }
-				],
-				about:
-					'Hide: what doesn\'t match simply isn\'t there, nothing is highlighted and your folds stay; an ancestor stays, dimmed, only to hold a match\'s place. Routes: every way from a match up to the top is opened and the rest hidden, so you see where each match lives; folding then lasts only as long as the search. Keep my folds: nothing opens or hides, the matches are marked, and a folded row says how many it holds; click that to open the way to them. In Directus, filters and searches each have their own mode, so a filter can hide archived items while a search highlights on top. Whichever mode, you can keep editing.'
+					"The column that indents with each level. It and every column before it move right as the tree gets deeper, and it gives up the same width, so the columns after it stay in a straight line. Hints such as \"12 below\" appear in it. None keeps Directus's own behaviour, where only the controls indent.",
+				group: 'Rows'
 			},
 			{
 				key: 'guides',
@@ -125,9 +117,10 @@ export const uis: UiEntry[] = [
 					{ value: 'shown', label: 'Shown' },
 					{ value: 'hidden', label: 'Hidden' }
 				],
-				about:
-					"A faint line from under an open item's chevron down everything inside it, wrapping round the last row, so it's clear where each item's contents end. Folds with the rows."
+				about: "A faint line runs from each open item's chevron down everything inside it, so you can see where its contents end.",
+				group: 'Rows'
 			},
+			repeat,
 			{
 				key: 'openDepth',
 				label: 'Levels open to start',
@@ -142,7 +135,8 @@ export const uis: UiEntry[] = [
 					{ value: '4', label: '4' }
 				],
 				about:
-					"How many levels start open, the layout's own option. Two by default: enough to see the shape without unfolding hundreds of rows. Folds you make yourself are kept on top of it."
+					'How many levels are open when the tree first loads. Two shows its shape without hundreds of rows. Folds you change yourself are remembered on top of it.',
+				group: 'Folding'
 			},
 			{
 				key: 'maxOpenDepth',
@@ -157,12 +151,40 @@ export const uis: UiEntry[] = [
 					{ value: '-1', label: 'No limit' }
 				],
 				about:
-					"How deep Unfold all (the header's chevron) and a search's routes go, so a deep tree doesn't indent every column after the name off screen; a row at the limit says how many matches are below it. Opening one row, or going to one match with Enter, goes as deep as it needs, and ⌘/Ctrl-clicking a chevron opens everything inside."
+					"The deepest that Unfold all and a search's routes will open, so a deep tree doesn't push the other columns off screen. A row at the limit says how many matches are below it. Opening a single row, or going to one match with Enter, goes as deep as it needs.",
+				group: 'Folding'
 			},
 			{
 				...motion,
 				about:
-					"Folding slides rows shut and open. Auto counts the rows drawn: in a big tree only the open ones are, so a huge tree with a few rows open still animates, and one with hundreds open just swaps. On forces it, to see the cost; off stops it."
+					'Folding slides rows open and shut. Auto animates while few enough rows are showing to stay smooth, so a huge tree with only a few rows open still animates. On always animates; Off never does.',
+				group: 'Folding'
+			},
+			{
+				key: 'searchMode',
+				label: 'While searching',
+				type: 'choice',
+				default: 'routes',
+				choices: [
+					{ value: 'routes', label: 'Show the routes to the matches' },
+					{ value: 'inplace', label: 'Keep my folds' }
+				],
+				about:
+					"What a search does to the tree. Show the routes opens every way from a match up to the top and hides the rest. Keep my folds marks the matches where they are, and a folded row says how many it holds, which suits a search that matches a lot. Either way, Enter goes to the next match. (In Directus a filter can also hide, or be turned off.)",
+				group: 'Searching'
+			},
+			{
+				key: 'click',
+				label: 'Clicking a row',
+				type: 'choice',
+				default: 'opens',
+				choices: [
+					{ value: 'opens', label: 'Opens it' },
+					{ value: 'selects', label: 'Selects it' }
+				],
+				about:
+					"Opens it is Directus's own behaviour: a click goes to the item, and an ⌥/Alt-click selects the row instead (hold ⌥ to see which). Selects it makes a click select the row, and a double-click opens it. A selected row's actions follow its name, with Open too when a click selects. Either way, once the table has focus the arrow keys move the selection and Enter opens it.",
+				group: 'Clicking'
 			}
 		]
 	},
@@ -172,7 +194,7 @@ export const uis: UiEntry[] = [
 		name: 'Tree lab',
 		component: TreeLab,
 		about: [
-			"The Tree table without Directus's limits: what the tree view could be if it didn't have to fit Directus's columns and item pages. The same placement rule — a node in full the first time, then a dashed duplicate that says where the full one is (\"in Fruit\"), as ICD-11 greys an entry whose home is elsewhere, and a ↻ in the warning colour where a cycle closes.",
+			"The Tree table without Directus's limits: what the tree view could be if it didn't have to fit Directus's columns and item pages. The same placement rule — a node in full the first time, then a dashed duplicate that says where the full one is (\"in …\", naming its parent there), as ICD-11 greys an entry whose home is elsewhere, and a ↻ in the warning colour where a cycle closes.",
 			"Free to add what Directus can't: the number beside a node counts its parents, and hovering it lights up every placement; hold Alt and everything the focus lives in lights up instead — Zotero's trick. A folded branch says how many distinct nodes are below it, as OLS does, so you know whether it's worth opening.",
 			'Start from the focus zooms in on one node, as Workflowy does. With Direction set to Parents below, that is Wikipedia\'s parents mode: everything the node belongs to, as a tree.'
 		],
@@ -180,6 +202,16 @@ export const uis: UiEntry[] = [
 			'Drag a row by its handle: onto the top or bottom of another to move beside it, onto its middle to move inside. Hold Alt to add a parent instead of moving. Hover a row for + (add a child), ✎ (edit) and × (remove it from this parent — a node under several keeps the others). Double-click to edit.',
 		options: [
 			density,
+			{
+				key: 'indent',
+				label: 'Indent (px)',
+				type: 'number',
+				default: 24,
+				min: 8,
+				max: 64,
+				about: 'How far each level steps in, in pixels.',
+				group: 'Rows'
+			},
 			motion,
 			repeat,
 			{
@@ -192,7 +224,8 @@ export const uis: UiEntry[] = [
 					{ value: 'focus', label: 'The focus' }
 				],
 				about:
-					'The roots, or zoomed in on one node: the focus at the moment you choose this, kept while you click around inside it (a button moves it to the new focus). With Direction set to Parents below, starting from a node shows everything it belongs to.'
+					'Start from the roots, or zoom in on one node. Zooming in keeps the node that had the focus when you chose it, however you click around inside, and a button moves it to the new focus. With Direction set to Parents below, this shows everything the node belongs to.',
+				group: 'Starting point'
 			},
 			{
 				key: 'openDepth',
@@ -201,17 +234,8 @@ export const uis: UiEntry[] = [
 				default: 0,
 				min: 0,
 				max: 8,
-				about:
-					"How many levels are open when a dataset loads, as the Directus layout's open depth does. 0 starts folded with just the way to the focus open."
-			},
-			{
-				key: 'indent',
-				label: 'Indent (px)',
-				type: 'number',
-				default: 24,
-				min: 8,
-				max: 64,
-				about: 'How far each level steps in.'
+				about: 'How many levels are open when a dataset loads. At 0 everything starts folded, except the way to the focus.',
+				group: 'Starting point'
 			}
 		]
 	},
@@ -251,7 +275,7 @@ export const uis: UiEntry[] = [
 				min: 1,
 				max: 80,
 				about:
-					'How many nodes each direction may show across its levels before it stops adding more. Low shows one level; high reaches further up and down.'
+					'How many nodes each direction may show, across its levels, before it stops adding more. A low budget shows one level; a high one reaches further up and down.'
 			}
 		]
 	},
@@ -271,7 +295,7 @@ export const uis: UiEntry[] = [
 			{
 				...motion,
 				about:
-					'Auto glides nodes to their new layers when the focus moves, up to 150 of them. Only with the focus-only scope, as the whole graph doesn\'t re-lay out on focus.'
+					"Auto glides nodes to their new layers when the focus moves, up to 150 of them. That only happens around the focus, as the whole graph doesn't change when the focus moves."
 			},
 			{
 				key: 'scope',
@@ -285,7 +309,7 @@ export const uis: UiEntry[] = [
 					{ value: 'ancestors', label: 'Ancestors only' }
 				],
 				about:
-					"The whole graph, the focus with what's above and below it, or only what's above it: QuickGO's ancestor chart, every path up to the roots at once. Auto shows it all up to 150 nodes."
+					"The whole graph, the focus with everything above and below it, or only what's above it, which is QuickGO's ancestor chart. Auto shows the whole graph up to 150 nodes."
 			}
 		]
 	},
@@ -308,7 +332,7 @@ export const uis: UiEntry[] = [
 			{
 				...motion,
 				about:
-					'Auto lets the layout settle live up to 500 nodes; past that it settles before drawing and then holds still, as repainting every line each frame would stutter.'
+					'Auto lets the layout settle on screen up to 500 nodes. Past that it settles before drawing and then holds still, as redrawing every line on every frame would stutter.'
 			}
 		]
 	},
@@ -326,16 +350,17 @@ export const uis: UiEntry[] = [
 		options: [
 			{
 				...density,
-				about: 'Here it sets how long the links are, so how spread out the graph is.'
+				about: 'Here it sets the length of the links, so how spread out the graph is.'
 			},
 			{
 				...motion,
 				about:
-					'Auto lets the layout settle live up to 500 nodes; past that it settles before drawing and then holds still.'
+					'Auto lets the layout settle on screen up to 500 nodes. Past that it settles before drawing and then holds still.'
 			},
 			{
 				key: 'scope',
 				label: 'Scope',
+				group: 'Scope',
 				type: 'choice',
 				default: 'all',
 				choices: [
@@ -343,11 +368,12 @@ export const uis: UiEntry[] = [
 					{ value: 'local', label: 'Around the focus' }
 				],
 				about:
-					"Obsidian's two graphs: the global one, everything at once, or the local one, only what's within the depth below of the focus."
+					"Obsidian's two graphs: the global one shows everything at once, and the local one only what's within a few links of the focus."
 			},
 			{
 				key: 'depth',
 				label: 'Local depth',
+				group: 'Scope',
 				type: 'number',
 				default: 2,
 				min: 1,
@@ -358,11 +384,11 @@ export const uis: UiEntry[] = [
 	},
 	{
 		id: 'faceted',
-		concepts: ['siblings'],
+		concepts: ['siblings', 'worked-out'],
 		name: 'Faceted',
 		component: FacetedView,
 		about: [
-			"Parents as filters instead of places. Tick Fruit and Salad and you're left with what's under both: tomato, cucumber, avocado and olive. It's how several parents actually get used — to narrow down — and why a shop files a product in many categories rather than one.",
+			"Parents as filters instead of places. In the Food data, ticking Fruit and Salad leaves what's under both: tomato, cucumber, avocado and olive. It's how several parents actually get used — to narrow down — and why a shop files a product in many categories rather than one.",
 			'Each count says how many results would be left if that facet were ticked too, so dead ends never show. In a tree, every intersection is empty: a thing has only one parent to match.'
 		],
 		editing:
@@ -380,7 +406,7 @@ export const uis: UiEntry[] = [
 					{ value: 'children', label: 'Its children only' }
 				],
 				about:
-					'Everything below a facet, as a search would mean it (a viral pneumonia is an infectious disease however many levels down), or only what sits directly under it.'
+					'Whether a facet holds everything below it, as a search would mean it, or only what sits directly under it.'
 			}
 		]
 	}

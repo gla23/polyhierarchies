@@ -18,6 +18,8 @@ Food
     Apple
     Banana
     Tomato
+      Cherry tomato
+      Plum tomato
     Cucumber
     Pumpkin
     Avocado
@@ -59,6 +61,8 @@ Chickpea ~ Olive
 		Apple: { colour: '#e05d5d', fields: { calories: 52, botanicalFruit: true } },
 		Banana: { icon: 'lucide:banana', colour: '#f4d03f', fields: { calories: 89, botanicalFruit: true } },
 		Tomato: { colour: '#e53935', fields: { calories: 18, botanicalFruit: true } },
+		'Cherry tomato': { colour: '#e53935', fields: { calories: 18, botanicalFruit: true } },
+		'Plum tomato': { colour: '#e53935', fields: { calories: 18, botanicalFruit: true } },
 		Cucumber: { colour: '#66bb6a', fields: { calories: 15, botanicalFruit: true } },
 		Pumpkin: { colour: '#fb8c00', fields: { calories: 26, botanicalFruit: true } },
 		Avocado: { colour: '#689f38', fields: { calories: 160, botanicalFruit: true } },

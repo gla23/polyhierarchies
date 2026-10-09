@@ -36,6 +36,8 @@ export interface LayoutOptions {
 	openDepth?: number | null;
 	/** The most levels Unfold all and a search's routes open; -1 for no limit */
 	maxOpenDepth?: number | null;
+	/** What a click on a row does: open the item, as Directus does, or select the row */
+	rowClick?: 'opens' | 'selects';
 }
 
 export interface LayoutQuery {
