@@ -215,12 +215,13 @@ export interface Placement extends Omit<TreeRow, 'open'> {
  * nodes have, which is what lets a one-parent tree view draw a polyhierarchy. Same rule as `useTree`:
  * in full where the spanning tree reaches a node first (everywhere, with mirrors), a terminal
  * duplicate elsewhere, and a loop where a node would repeat inside its own route. Mirrors can
- * multiply, so it stops at `limit` rows.
+ * multiply, so they stop at `limit` rows; otherwise there's a row per edge (and root), and a cap
+ * would only lose a big tree's last rows.
  */
-export function placementTree(graph: Graph, repeat: Repeat, limit = unfoldLimit): Placement[] {
+export function placementTree(graph: Graph, repeat: Repeat, limit = repeat === 'mirror' ? unfoldLimit : Infinity): Placement[] {
 	const out: Placement[] = [];
-	const visit = (path: string[]): string[] => {
-		if (out.length >= limit) return [];
+	const visit = (path: string[]) => {
+		if (out.length >= limit) return;
 		const id = path.at(-1)!;
 		const parent = path.at(-2) ?? null;
 		const loop = path.slice(0, -1).includes(id);
@@ -242,9 +243,11 @@ export function placementTree(graph: Graph, repeat: Repeat, limit = unfoldLimit)
 			hasChildren: children.length > 0,
 			descendants: []
 		};
+		const at = out.length;
 		out.push(placement);
-		for (const child of children) placement.descendants.push(...visit([...path, child]));
-		return [key, ...placement.descendants];
+		for (const child of children) visit([...path, child]);
+		// Depth first, so everything below is what came after it
+		placement.descendants = out.slice(at + 1).map((below) => below.key);
 	};
 	for (const root of graph.roots) visit([root]);
 	return out;

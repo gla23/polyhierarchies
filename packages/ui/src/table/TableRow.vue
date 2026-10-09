@@ -22,8 +22,13 @@ const props = withDefaults(
 		foldTarget?: boolean;
 		/** What clicking the chevron does, with or without a modifier held */
 		foldHint?: string;
-		/** This row's share of the tree's guide lines, by the level of the ancestor each belongs to */
-		guides?: { level: number; kind: 'through' | 'end' | 'stub' }[];
+		/**
+		 * This row's share of the tree's guide lines, by level from the outermost: so many going on
+		 * through it, then so many ending in it, then one from under its own chevron if it's open
+		 */
+		guideThrough?: number;
+		guideEnds?: number;
+		guideStub?: boolean;
 		/** Its top divider starts where the guide curving into it ends */
 		dividerInset?: boolean;
 		/** Its guides that end go on into the next row, which draws their curves */
@@ -74,10 +79,12 @@ const props = withDefaults(
 // The pointer events too: declared, a new listener from the table doesn't count as a change to redraw for
 const emit = defineEmits(['click', 'dblclick', 'item-selected', 'toggle-children', 'chevron-hover', 'hint-click', 'mouseenter', 'mouseleave', 'mouseover']);
 
-// Told to the table, which marks the rows far off screen
-const tableRows = inject<{ added: (row: Element) => void; removed: (row: Element) => void } | null>('table-rows', null);
+// Told to the table, which says whether the row is far off screen (see its farRows)
+const tableRows = inject<{ added: (row: Element, far: Ref<boolean>) => void; removed: (row: Element) => void } | null>('table-rows', null);
 const rowElement = ref<HTMLElement>();
-onMounted(() => rowElement.value && tableRows?.added(rowElement.value));
+/** Far off screen: the row's box, which keeps its height, but no cells. Far until measured. */
+const far = ref(!!tableRows);
+onMounted(() => rowElement.value && tableRows?.added(rowElement.value, far));
 onBeforeUnmount(() => rowElement.value && tableRows?.removed(rowElement.value));
 
 const SlotOf: FunctionalComponent<{ render: Slot; item: Item }> = ({ render, item }) => render({ item });
@@ -189,17 +196,28 @@ function usePreventClickAfterDragging({
 		@mouseleave="emit('mouseleave', $event)"
 		@mouseover="emit('mouseover', $event)"
 	>
-		<td
-			class="cell controls"
-			:style="indent > 0 ? { paddingLeft: `${indent}px` } : null"
-		>
-			<template v-if="!sorting">
+		<template v-if="!far">
+			<td
+				class="cell controls"
+				:style="indent > 0 ? { paddingLeft: `${indent}px` } : null"
+			>
+				<!-- A held row's too: they're worked out from where it would land -->
 				<span
-					v-for="guide in guides"
-					:key="`${guide.level}-${guide.kind}`"
-					class="guide"
-					:class="[guide.kind, { continues: guide.kind === 'end' && guidesContinue }]"
-					:style="{ left: `${guide.level * 28 + 14}px` }"
+					v-if="guideThrough"
+					class="guide through"
+					:style="{ width: `calc(${(guideThrough - 1) * 28}px + var(--theme--border-width))` }"
+				/>
+				<span
+					v-for="end in guideEnds"
+					:key="end"
+					class="guide end"
+					:class="{ continues: guidesContinue }"
+					:style="{ left: `${(guideThrough! + end - 1) * 28 + 14}px` }"
+				/>
+				<span
+					v-if="guideStub"
+					class="guide stub"
+					:style="{ left: `${(guideThrough! + guideEnds!) * 28 + 14}px` }"
 				/>
 				<span
 					v-for="level in guideCorners"
@@ -207,135 +225,135 @@ function usePreventClickAfterDragging({
 					class="guide corner"
 					:style="{ left: `${level * 28 + 14}px` }"
 				/>
-			</template>
-			<div
-				class="cell-style"
-				:class="{ 'divider-inset': dividerInset }"
-			>
-				<!-- First, so a leaf's empty slot reads as indentation rather than a gap before its content -->
-				<span
-					v-if="treeView"
-					class="chevron-slot"
+				<div
+					class="cell-style"
+					:class="{ 'divider-inset': dividerInset }"
 				>
-					<!-- A real button, which a v-icon with a click listener isn't: reachable by Tab and Vimium -->
-					<button
-						v-if="hasChildren"
-						v-tooltip="foldHint"
-						type="button"
-						class="collapse-btn"
-						:class="{
-							'children-collapsed': childrenCollapsed,
-							'fold-target': foldTarget,
-							'movable': showManualSort && sortedManually,
-						}"
-						:aria-label="childrenCollapsed ? 'Unfold' : 'Fold'"
-						:aria-expanded="!childrenCollapsed"
-						@mousedown="showManualSort && onChevronMouseDown($event)"
-						@click.stop="onChevronClick"
-						@pointerenter="$emit('chevron-hover', $event)"
-						@pointermove="$emit('chevron-hover', $event)"
-						@pointerleave="$emit('chevron-hover', null)"
+					<!-- First, so a leaf's empty slot reads as indentation rather than a gap before its content -->
+					<span
+						v-if="treeView"
+						class="chevron-slot"
 					>
-						<v-icon name="expand_more" />
-					</button>
+						<!-- A real button, which a v-icon with a click listener isn't: reachable by Tab and Vimium -->
+						<button
+							v-if="hasChildren"
+							v-tooltip="foldHint"
+							type="button"
+							class="collapse-btn"
+							:class="{
+								'children-collapsed': childrenCollapsed,
+								'fold-target': foldTarget,
+								'movable': showManualSort && sortedManually,
+							}"
+							:aria-label="childrenCollapsed ? 'Unfold' : 'Fold'"
+							:aria-expanded="!childrenCollapsed"
+							@mousedown="showManualSort && onChevronMouseDown($event)"
+							@click.stop="onChevronClick"
+							@pointerenter="$emit('chevron-hover', $event)"
+							@pointermove="$emit('chevron-hover', $event)"
+							@pointerleave="$emit('chevron-hover', null)"
+						>
+							<v-icon name="expand_more" />
+						</button>
+						<v-icon
+							v-else-if="showManualSort"
+							name="drag_handle"
+							class="drag-handle manual"
+							:class="{ 'sorted-manually': sortedManually, nestable }"
+							@click.stop
+							@mousedown.prevent="onMouseDown(item, $event)"
+						/>
+						<span
+							v-else
+							class="leaf-mark"
+						/>
+					</span>
 					<v-icon
-						v-else-if="showManualSort"
+						v-if="showManualSort && !treeView"
 						name="drag_handle"
 						class="drag-handle manual"
 						:class="{ 'sorted-manually': sortedManually, nestable }"
 						@click.stop
 						@mousedown.prevent="onMouseDown(item, $event)"
 					/>
-					<span
-						v-else
-						class="leaf-mark"
+
+					<v-checkbox
+						v-if="showSelect !== 'none'"
+						class="select"
+						:icon-on="
+							showSelect === 'one'
+								? 'radio_button_checked'
+								: undefined
+						"
+						:icon-off="
+							showSelect === 'one'
+								? 'radio_button_unchecked'
+								: undefined
+						"
+						:model-value="isSelected"
+						@click.stop
+						@update:model-value="$emit('item-selected', $event)"
 					/>
+
+				</div>
+			</td>
+
+			<td
+				v-for="header in headers"
+				:key="header.value"
+				class="cell"
+				:class="[`align-${header.align}`, { placed: header.value === hintColumn && hint }]"
+			>
+				<SlotOf
+					v-if="cellSlots?.[`item.${header.value}`]"
+					:render="cellSlots[`item.${header.value}`]!"
+					:item
+				/>
+				<template v-else>
+					<v-text-overflow
+						v-if="
+							header.value.split('.').reduce((acc, val) => {
+								return acc[val];
+							}, item)
+						"
+						:text="
+							header.value.split('.').reduce((acc, val) => {
+								return acc[val];
+							}, item)
+						"
+					/>
+					<value-null v-else />
+				</template>
+				<!-- A button: it does something of its own (see the table's onHintClick), not open the item -->
+				<button
+					v-if="header.value === hintColumn && hint"
+					v-tooltip="hint.tip"
+					type="button"
+					class="placement-hint"
+					:class="hint.kind"
+					@click.stop="emit('hint-click', hint.kind)"
+				>
+					{{ hint.text }}
+				</button>
+				<span
+					v-if="tools && header.value === hintColumn && cellSlots?.['row-tools']"
+					class="row-tools"
+					@click.stop
+					@dblclick.stop
+				>
+					<SlotOf :render="cellSlots['row-tools']" :item />
 				</span>
-				<v-icon
-					v-if="showManualSort && !treeView"
-					name="drag_handle"
-					class="drag-handle manual"
-					:class="{ 'sorted-manually': sortedManually, nestable }"
-					@click.stop
-					@mousedown.prevent="onMouseDown(item, $event)"
-				/>
+			</td>
 
-				<v-checkbox
-					v-if="showSelect !== 'none'"
-					class="select"
-					:icon-on="
-						showSelect === 'one'
-							? 'radio_button_checked'
-							: undefined
-					"
-					:icon-off="
-						showSelect === 'one'
-							? 'radio_button_unchecked'
-							: undefined
-					"
-					:model-value="isSelected"
-					@click.stop
-					@update:model-value="$emit('item-selected', $event)"
-				/>
-
-			</div>
-		</td>
-
-		<td
-			v-for="header in headers"
-			:key="header.value"
-			class="cell"
-			:class="[`align-${header.align}`, { placed: header.value === hintColumn && hint }]"
-		>
-			<SlotOf
-				v-if="cellSlots?.[`item.${header.value}`]"
-				:render="cellSlots[`item.${header.value}`]!"
-				:item
-			/>
-			<template v-else>
-				<v-text-overflow
-					v-if="
-						header.value.split('.').reduce((acc, val) => {
-							return acc[val];
-						}, item)
-					"
-					:text="
-						header.value.split('.').reduce((acc, val) => {
-							return acc[val];
-						}, item)
-					"
-				/>
-				<value-null v-else />
-			</template>
-			<!-- A button: it does something of its own (see the table's onHintClick), not open the item -->
-			<button
-				v-if="header.value === hintColumn && hint"
-				v-tooltip="hint.tip"
-				type="button"
-				class="placement-hint"
-				:class="hint.kind"
-				@click.stop="emit('hint-click', hint.kind)"
-			>
-				{{ hint.text }}
-			</button>
-			<span
-				v-if="tools && header.value === hintColumn && cellSlots?.['row-tools']"
-				class="row-tools"
+			<td class="spacer cell" />
+			<td
+				v-if="cellSlots?.['item-append']"
+				class="append cell"
 				@click.stop
-				@dblclick.stop
 			>
-				<SlotOf :render="cellSlots['row-tools']" :item />
-			</span>
-		</td>
-
-		<td class="spacer cell" />
-		<td
-			v-if="cellSlots?.['item-append']"
-			class="append cell"
-			@click.stop
-		>
-			<SlotOf :render="cellSlots['item-append']" :item />
-		</td>
+				<SlotOf :render="cellSlots['item-append']" :item />
+			</td>
+		</template>
 	</tr>
 </template>
 
@@ -462,9 +480,18 @@ function usePreventClickAfterDragging({
 	pointer-events: none;
 }
 
+/* Every line going on through the row as one element, a line a level apart, however deep it is:
+   an element per level was most of the page in a big tree unfolded a hundred levels deep */
 .guide.through {
 	top: 0;
 	bottom: -1px;
+	left: 14px;
+	border-left: none;
+	background: repeating-linear-gradient(
+		to right,
+		var(--theme--border-color-subdued) 0 var(--theme--border-width),
+		transparent 0 28px
+	);
 }
 
 /* From just under the open chevron */
@@ -515,12 +542,6 @@ function usePreventClickAfterDragging({
 
     .table-row {
 	height: var(--tree-table-row-height);
-
-	/* Far off screen (see the table's farRows): the row's box, which keeps its height, but no cells.
-	   Important over each kind of cell's own display */
-	&[data-far] > .cell {
-		display: none !important;
-	}
 
 
 	.cell {

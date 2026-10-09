@@ -14,23 +14,13 @@ import {
 import { getEndpoint } from '@directus/utils';
 import { createGraph, fromJunction, fromParentField } from '@polyhierarchies/core';
 import { debounce, flatten } from 'lodash';
-import {
-	computed,
-
-	provide,
-	ref,
-
-	toRefs,
-	unref,
-	watch,
-} from 'vue';
+import { computed, provide, ref, toRefs, unref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import Actions from './actions.vue';
 // CORE IMPORTS
 import { useAliasFields } from './core-clones/composables/use-alias-fields';
 import { useLayoutClickHandler } from './core-clones/composables/use-layout-click-handler';
-import { adjustFieldsForDisplays } from './core-clones/utils/adjust-fields-for-displays';
 import { formatItemsCountPaginated, formatItemsCountRelative } from './core-clones/utils/format-items-count';
 import { getDefaultDisplayForType } from './core-clones/utils/get-default-display-for-type';
 import { hideDragImage } from './core-clones/utils/hide-drag-image';
@@ -43,7 +33,7 @@ import { planSortMoves } from './sort-plan';
 
 export default defineLayout<LayoutOptions, LayoutQuery>({
 	id: 'directus-labs-tree-view-table-layout',
-	name: 'Tree View Table Fixed',
+	name: 'Polyhierarchies',
 	icon: 'format_indent_increase',
 	component: Layout,
 	slots: {
@@ -233,7 +223,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 
 		const { links, linksActive, linkKey, loadLinks, linksError } = useJunction();
 		const { saveEdits, shownItems } = useSaveEdits();
-		const { graph, nodeLabel } = useHierarchyGraph();
+		const { graph, nodeLabel, itemsById } = useHierarchyGraph();
 		const rowActions = useRowActions();
 
 		return {
@@ -468,17 +458,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				},
 			});
 
-			const fieldsWithRelational = computed(() => {
-				if (!props.collection)
-					return [];
-				return adjustFieldsForDisplays(
-					fields.value,
-					props.collection,
-					system,
-				);
-			});
-
-			return { sort, limit, page, fields, fieldsWithRelational };
+			return { sort, limit, page, fields };
 		}
 
 		function useTable() {
@@ -627,7 +607,6 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				onSortChange,
 				onAlignChange,
 				activeFields,
-				getFieldDisplay,
 			};
 
 			function onSortChange(newSort: Sort | null) {
@@ -655,20 +634,6 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 						[field]: align,
 					},
 				});
-			}
-
-			function getFieldDisplay(fieldKey: string) {
-				const field = fieldsInCollection.value.find(
-					(field: Field) => field.field === fieldKey,
-				);
-
-				if (!field?.meta?.display)
-					return null;
-
-				return {
-					display: field.meta.display,
-					options: field.meta.display_options,
-				};
 			}
 		}
 
@@ -842,7 +807,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 					?? id;
 			}
 
-			return { graph, nodeLabel };
+			return { graph, nodeLabel, itemsById };
 		}
 
 		/**
@@ -878,7 +843,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			/** The item's own primary key, as the graph's ids are strings */
 			function keyOf(id: string) {
 				const pk = primaryKeyField.value?.field;
-				return (pk ? shownItems.value.find((item) => String(item[pk]) === id)?.[pk] : undefined) ?? id;
+				return (pk ? itemsById.value.get(id)?.[pk] : undefined) ?? id;
 			}
 
 			function openCursor() {
@@ -996,11 +961,6 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			}
 		}
 
-		/**
-		 * Searching or filtering a tree: Directus finds the matching items, with the same search and
-		 * filter it would have applied to the list, so a search means what it always does. The tree
-		 * stays loaded whole and the table shows the routes to them.
-		 */
 		/**
 		 * Searching or filtering a tree: Directus finds the matching items, with the same search and
 		 * filter it would have applied to the list, asked separately so each can have its own mode.

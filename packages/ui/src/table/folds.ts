@@ -1,8 +1,19 @@
 import type { Ref } from 'vue';
 import { ref, watch } from 'vue';
 
+export interface Folds {
+	/**
+	 * Everything folded or unfolded at once, open to this depth (null: all of it), in place of the
+	 * view's starting depth. One number rather than an entry per row: unfolding a deep tree wrote one
+	 * per row, each a whole route, half a megabyte again with every fold after.
+	 */
+	depth?: number | null;
+	/** Each placement folded (true) or unfolded (false) where that differs from the depth */
+	rows: Record<string, boolean>;
+}
+
 /** One store per collection for the whole page, so the table and the sidebar's reset see the same folds */
-const stores = new Map<string, Ref<Record<string, boolean>>>();
+const stores = new Map<string, Ref<Folds>>();
 
 /**
  * The placements you've folded or unfolded yourself, where they differ from the view's starting depth
@@ -12,28 +23,30 @@ const stores = new Map<string, Ref<Record<string, boolean>>>();
  * sidebar's reset each call this, and share the one store.
  */
 export function useFolds(collection: string) {
-	// By placement now (a node with two parents folds separately in each), so a new key: the old
-	// one held folds by item, which would land on the wrong rows
-	const key = `${collection}--tree-view-placement-folds`;
+	// A new key for each new shape, as the old would land on the wrong rows or be misread
+	const key = `${collection}--tree-view-folds`;
 	const shared = stores.get(key);
-	if (shared) return { folds: shared, reset: () => (shared.value = {}) };
+	if (shared) return { folds: shared, reset: () => (shared.value = { rows: {} }) };
 
-	let stored: Record<string, boolean> = {};
+	let stored: Folds = { rows: {} };
 	try {
-		stored = JSON.parse(localStorage.getItem(key) ?? 'null') ?? {};
+		localStorage.removeItem(`${collection}--tree-view-placement-folds`);
+		const parsed = JSON.parse(localStorage.getItem(key) ?? 'null');
+		if (parsed && typeof parsed.rows === 'object') stored = parsed;
 	}
 	catch {}
-	const folds = ref<Record<string, boolean>>(stored);
+	const folds = ref<Folds>(stored);
+	// Every change replaces the folds whole
 	watch(folds, (value) => {
 		try {
 			localStorage.setItem(key, JSON.stringify(value));
 		}
 		catch {}
-	}, { deep: true });
+	});
 	stores.set(key, folds);
 
 	function reset() {
-		folds.value = {};
+		folds.value = { rows: {} };
 	}
 
 	return { folds, reset };

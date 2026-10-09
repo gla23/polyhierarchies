@@ -23,6 +23,7 @@ import {
 	reactive,
 	ref,
 	shallowRef,
+	toRaw,
 	toRef,
 	useSlots,
 	watch,
@@ -308,12 +309,12 @@ function onItemSelected(event: ItemSelectEvent) {
 	emit('update:modelValue', selection);
 }
 
+/** Once per selection rather than once per row: asked by every row each time the table redraws */
+const selectedKeys = computed(() =>
+	new Set(props.selectionUseKeys ? props.modelValue : props.modelValue.map((item) => item[props.itemKey])),
+);
 function getSelectedState(item: Item) {
-	const selectedKeys = props.selectionUseKeys
-		? props.modelValue
-		: props.modelValue.map((item) => item[props.itemKey]);
-
-	return selectedKeys.includes(item[props.itemKey]);
+	return selectedKeys.value.has(item[props.itemKey]);
 }
 
 function onToggleSelectAll(value: boolean) {
@@ -341,12 +342,6 @@ function updateSort(newSort: Sort) {
 }
 
 const controlIconWidth = 28;
-const controlIconWidthCSS = `${controlIconWidth}px`;
-const rowHeights = computed(() => ({
-	row: `${props.rowHeight + 2}px`,
-	image: `${props.rowHeight - 16}px`,
-	leafMark: `${Math.round((props.rowHeight + 2) * 0.55)}px`,
-}));
 
 /** Where the tree column is now: how many columns follow the hierarchy, and where hints go */
 const treeColumnIndex = computed(() => {
@@ -484,6 +479,14 @@ const columnStyle = computed<{ header: string; rows: string }>(() => {
 		),
 	};
 });
+/** The sizes every row reads, set once on the root rather than on each row */
+const sizeVars = computed(() => ({
+	'--tree-table-row-columns': columnStyle.value.rows,
+	'--tree-table-header-columns': columnStyle.value.header,
+	'--tree-table-row-height': `${props.rowHeight + 2}px`,
+	'--tree-table-image-height': `${props.rowHeight - 16}px`,
+	'--tree-table-leaf-mark-height': `${Math.round((props.rowHeight + 2) * 0.55)}px`,
+}));
 
 const internalItems = ref<Item[]>([]);
 
@@ -498,10 +501,10 @@ const {
 	itemDepth,
 	itemParent,
 	childrenKey,
-	collapsedKey,
-	collapsedParentsKey,
+	isFolded,
+	isFoldedAway,
 	onSortUpdate,
-	setAllCollapsed,
+	openTo,
 	setCollapsed,
 	resetFolds,
 	ownFolds,
@@ -533,8 +536,10 @@ watch(
  * Tree guides: a faint line from under an open item's chevron down everything inside it, curving
  * at the bottom of the last row so it wraps the whole of it; curving mid-row made the last item look
  * half outside. Each row draws its share, a line for every ancestor, so the lines fold with the rows.
+ * The lines that end there are always the innermost, so a row's share is counts: from the outermost
+ * level, `through` lines going on down, then `ends` lines ending, then a stub if it's open itself.
  */
-type Guide = { level: number; kind: 'through' | 'end' | 'stub' };
+type Guides = { through: number; ends: number; stub: boolean };
 /**
  * While searching, the rows on a route to a match: each matching placement and every placement
  * above it. Placement keys are routes, so the ones above are the key's prefixes.
@@ -626,12 +631,12 @@ const rowHidden = (item: Item) =>
 const rowHiddenBySearchOrFold = (item: Item) =>
 	searchRoutes.value
 		? !searchRoutes.value.keys.has(item[rowKey]) || closedAbove(item[rowKey])
-		: !!item[collapsedParentsKey]?.length;
+		: isFoldedAway(item);
 /** Folded, as its chevron shows it: while searching, open exactly where a route runs through */
 const rowFolded = (item: Item) =>
 	searchRoutes.value
 		? !searchRoutes.value.parents.has(item[rowKey]) || !routeOpen(item[rowKey])
-		: item[collapsedKey];
+		: isFolded(item);
 
 /**
  * Whether folds animate. Moving rows lays out every row each frame, so auto counts the rows drawn:
@@ -816,32 +821,61 @@ function focusTable() {
 defineExpose({ goToMatch, focusTable, pickCursor, unfoldCursor });
 
 /**
- * Rows over a screen away are marked far and drawn without their cells, so restyling the page, as
- * Directus does whenever its sidebar moves, doesn't restyle hundreds of rows no one can see.
- * `content-visibility` would keep them findable, but Gecko restyles what it skips; and on every row,
- * rows scrolling into view were drawn a moment late, visibly.
+ * Rows over a screen away are far, and drawn without their cells: unfolding a big tree builds a few
+ * elements a row rather than every cell, and restyling the page, as Directus does whenever its
+ * sidebar moves, doesn't restyle hundreds of rows no one can see. `content-visibility` would keep
+ * them findable, but Gecko restyles what it skips; and on every row, rows scrolling into view were
+ * drawn a moment late, visibly. A row starts far, and is measured as soon as it's in the page,
+ * before anything's painted, so the rows in view never show empty; then the observer keeps it up.
  */
 let farRows: IntersectionObserver | undefined;
+/** What scrolls the table: from the window, that scroller's edge would cut the margin off */
+let scroller: HTMLElement | null = null;
+const farOf = new WeakMap<Element, Ref<boolean>>();
+let measuring: Map<Element, Ref<boolean>> | null = null;
+function measureRows() {
+	const rows = measuring!;
+	measuring = null;
+	const view = scroller?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight };
+	// As the observer's margin: a screen above and below
+	const reach = view.bottom - view.top;
+	for (const [row, far] of rows) {
+		if (!row.isConnected)
+			continue;
+		const { top, bottom } = row.getBoundingClientRect();
+		// Without an observer to bring it back, never
+		far.value = !!farRows && (bottom < view.top - reach || top > view.bottom + reach);
+		farRows?.observe(row);
+	}
+}
 provide('table-rows', {
-	added: (row: Element) => farRows?.observe(row),
+	added: (row: Element, far: Ref<boolean>) => {
+		farOf.set(row, far);
+		if (!measuring) {
+			measuring = new Map();
+			// Once every row this redraw adds is in, in one go: one layout, however many there are
+			void nextTick(measureRows);
+		}
+		measuring.set(row, far);
+	},
 	removed: (row: Element) => farRows?.unobserve(row),
 });
 onMounted(() => {
+	scroller = tableRoot.value?.parentElement ?? null;
+	while (scroller && !/auto|scroll|overlay/.test(getComputedStyle(scroller).overflowY))
+		scroller = scroller.parentElement;
 	if (typeof IntersectionObserver === 'undefined')
 		return;
-	// Measured from what scrolls the table: from the window, that scroller's edge would cut the margin off
-	let root = tableRoot.value?.parentElement ?? null;
-	while (root && !/auto|scroll|overlay/.test(getComputedStyle(root).overflowY))
-		root = root.parentElement;
 	farRows = new IntersectionObserver(
 		(entries) => {
-			for (const entry of entries)
-				entry.target.toggleAttribute('data-far', !entry.isIntersecting);
+			for (const entry of entries) {
+				const far = farOf.get(entry.target);
+				if (far)
+					far.value = !entry.isIntersecting;
+			}
 		},
-		{ root, rootMargin: '100% 0px' },
+		{ root: scroller, rootMargin: '100% 0px' },
 	);
-	for (const row of tableRoot.value?.querySelectorAll('.table-row') ?? [])
-		farRows.observe(row);
 });
 onBeforeUnmount(() => farRows?.disconnect());
 
@@ -985,34 +1019,59 @@ function onTableKey(event: KeyboardEvent) {
 }
 
 
+/** The row being dragged and the parent it would land under now: its guides are drawn from there */
+const held = ref<{ key: PrimaryKey; parent: PrimaryKey | null } | null>(null);
+
 const guidesById = computed(() => {
-	const guides = new Map<PrimaryKey, Guide[]>();
+	const guides = new Map<PrimaryKey, Guides>();
 	// Not while searching: they follow the folds, and the search shows its own rows
 	if (!props.showGuides || !nesting.value || searchRoutes.value)
 		return guides;
 	const byId = new Map(internalItems.value.map((item) => [item[rowKey], item]));
+	const landing = held.value;
+	const parentOf = (item: Item) => (landing && item[rowKey] === landing.key ? landing.parent : item[itemParent]);
 	const lastChild = new Map<PrimaryKey, PrimaryKey>();
 	for (const item of internalItems.value) {
-		if (byId.has(item[itemParent]))
-			lastChild.set(item[itemParent], item[rowKey]);
+		if (byId.has(parentOf(item)))
+			lastChild.set(parentOf(item), item[rowKey]);
 	}
-	for (const item of internalItems.value) {
-		// Its ancestors on this page, top first; stopping at one seen already, should the data loop
-		const path: PrimaryKey[] = [item[rowKey]];
-		for (let parent = item[itemParent]; byId.has(parent) && !path.includes(parent); parent = byId.get(parent)![itemParent])
-			path.unshift(parent);
-		const depth = path.length - 1;
-		const open = !!item[childrenKey]?.length && !item[collapsedKey];
-		const own: Guide[] = [];
-		// The row is the last of an ancestor's rows if it's closed and last child all the way down
-		let lastBelow = !open;
-		for (let level = depth - 1; level >= 0; level--) {
-			lastBelow &&= lastChild.get(path[level]!) === path[level + 1];
-			own.push({ level, kind: lastBelow ? 'end' : 'through' });
+	// By its ancestors on this page, each worked out once: walking every row's whole route was
+	// quadratic in the depth, and a fully unfolded big tree runs a hundred levels deep
+	const depths = new Map<PrimaryKey, number>();
+	const lastRuns = new Map<PrimaryKey, number>();
+	const depthOf = (key: PrimaryKey): number => {
+		let depth = depths.get(key);
+		if (depth === undefined) {
+			const parent = parentOf(byId.get(key)!);
+			depths.set(key, (depth = byId.has(parent) ? depthOf(parent) + 1 : 0));
 		}
-		if (open)
-			own.push({ level: depth, kind: 'stub' });
-		guides.set(item[rowKey], own);
+		return depth;
+	};
+	/** How many of it and its ancestors in turn are the last row inside their parent */
+	const lastRun = (key: PrimaryKey): number => {
+		let run = lastRuns.get(key);
+		if (run === undefined) {
+			const parent = parentOf(byId.get(key)!);
+			lastRuns.set(key, (run = byId.has(parent) && lastChild.get(parent) === key ? lastRun(parent) + 1 : 0));
+		}
+		return run;
+	};
+	// Whether a row holds others as it will once the held row lands: the row it lands in gains one
+	// (and opens), the row it left may lose its only one
+	const opensAs = (item: Item) => {
+		const inside: string[] = item[childrenKey] ?? [];
+		if (!landing || item[rowKey] === landing.key)
+			return inside.length > 0 && !isFolded(item);
+		if (item[rowKey] === landing.parent)
+			return true;
+		return inside.some((key) => key !== landing.key && !key.startsWith(`${landing.key}/`)) && !isFolded(item);
+	};
+	for (const item of internalItems.value) {
+		const key = item[rowKey];
+		const open = opensAs(item);
+		// A closed row ends the line of each ancestor it's the last row of, all the way out
+		const ends = open ? 0 : lastRun(key);
+		guides.set(key, { through: depthOf(key) - ends, ends, stub: open });
 	}
 	return guides;
 });
@@ -1029,17 +1088,17 @@ const guideJoins = computed(() => {
 	const insets = new Set<PrimaryKey>();
 	let ended: { id: PrimaryKey; levels: number[] } | null = null;
 	for (const item of internalItems.value) {
-		if (item[collapsedParentsKey]?.length)
+		if (isFoldedAway(item))
 			continue;
+		const guides = guidesById.value.get(item[rowKey]);
 		if (ended) {
 			continuing.add(ended.id);
 			cornersBelow.set(item[rowKey], ended.levels);
-			if (Math.min(...ended.levels) === (item[itemDepth] ?? 0))
+			// Its depth as its guides have it, which for a dragged row is where it would land
+			if (Math.min(...ended.levels) === (guides ? guides.through + guides.ends : (item[itemDepth] ?? 0)))
 				insets.add(item[rowKey]);
 		}
-		const levels = (guidesById.value.get(item[rowKey]) ?? [])
-			.filter((guide) => guide.kind === 'end')
-			.map((guide) => guide.level);
+		const levels = guides ? Array.from({ length: guides.ends }, (_, end) => guides.through + end) : [];
 		ended = levels.length ? { id: item[rowKey], levels } : null;
 	}
 	// The last row's guides curve onto the table's bottom border, so it starts where the outermost
@@ -1051,7 +1110,7 @@ const guideJoins = computed(() => {
 const foldableItems = computed(() => internalItems.value.filter((item) => item[childrenKey]?.length));
 /** Every item with children on this page folded, so the header's chevron unfolds rather than folds */
 const allFolded = computed(
-	() => foldableItems.value.length > 0 && foldableItems.value.every((item) => item[collapsedKey]),
+	() => foldableItems.value.length > 0 && foldableItems.value.every(isFolded),
 );
 
 /**
@@ -1088,19 +1147,11 @@ function reachFrom(item: Item, reach: FoldReach): PrimaryKey[] {
 			.filter((other) => (other[itemParent] ?? null) === parent && hasChildren(other))
 			.map((other) => other[rowKey]);
 	}
-	const byId = new Map(internalItems.value.map((other) => [other[rowKey], other]));
-	const found = new Set<PrimaryKey>();
-	const visit = (at: Item) => {
-		for (const child of at[childrenKey] ?? []) {
-			const childItem = byId.get(child);
-			if (childItem && hasChildren(childItem) && !found.has(child)) {
-				found.add(child);
-				visit(childItem);
-			}
-		}
-	};
-	visit(item);
-	return [...found];
+	// Everything inside it, as its children key holds every placement below, not only the next level
+	return (item[childrenKey] ?? []).filter((key: PrimaryKey) => {
+		const inside = rowsByKey.value.get(String(key));
+		return !!inside && hasChildren(inside);
+	});
 }
 
 /**
@@ -1176,12 +1227,8 @@ function onFoldAll(event?: MouseEvent) {
 	if (event?.altKey)
 		return resetFolds();
 	if (!allFolded.value)
-		return setAllCollapsed(true);
-	const cap = event?.metaKey || event?.ctrlKey ? null : openCap.value;
-	setCollapsed(
-		foldableItems.value.filter((item) => cap === null || (item[itemDepth] ?? 0) < cap).map((item) => item[rowKey]),
-		false,
-	);
+		return openTo(0);
+	openTo(event?.metaKey || event?.ctrlKey ? null : openCap.value);
 }
 /** Folded rows that unfolding to the cap would leave shut: only then is there more for ⌘-click */
 const foldedPastCap = computed(() => openCap.value !== null && foldableItems.value.some((item) => (item[itemDepth] ?? 0) >= openCap.value!));
@@ -1197,15 +1244,15 @@ const foldAllTip = computed(() => {
 /** Which way a click goes: the item's own way, or for everything inside, fold unless all are */
 function foldsWith(item: Item, reach: FoldReach | null, targets: PrimaryKey[]) {
 	if (reach !== 'inside')
-		return !item[collapsedKey];
-	const byId = new Map(internalItems.value.map((other) => [other[rowKey], other]));
-	return targets.some((id) => !byId.get(id)?.[collapsedKey]);
+		return !isFolded(item);
+	return targets.some((id) => {
+		const row = rowsByKey.value.get(String(id));
+		return !!row && !isFolded(row);
+	});
 }
 
 const hoveredItem = computed(() =>
-	hoveredChevron.value === null
-		? null
-		: internalItems.value.find((item) => item[rowKey] === hoveredChevron.value) ?? null,
+	hoveredChevron.value === null ? null : rowsByKey.value.get(String(hoveredChevron.value)) ?? null,
 );
 const foldTargets = computed(
 	() =>
@@ -1220,7 +1267,7 @@ function chevronHint(item: Item) {
 			return 'Nothing inside to fold';
 		return `${foldsWith(item, reach, targets) ? 'Fold' : 'Unfold'} everything inside`;
 	}
-	const verb = item[collapsedKey] ? 'Unfold' : 'Fold';
+	const verb = isFolded(item) ? 'Unfold' : 'Fold';
 	if (reach === 'siblings')
 		return `${verb} this and its siblings`;
 	const modifiers = `${reachKeys.inside}-click: everything inside\n${reachKeys.siblings}-click: with its siblings`;
@@ -1243,7 +1290,7 @@ function onChevronClick(item: Item, event: MouseEvent) {
 	const reach = reachOf(event);
 	if (!reach) {
 		if (item[childrenKey]?.length)
-			setCollapsed([item[rowKey]], !item[collapsedKey]);
+			setCollapsed([item[rowKey]], !isFolded(item));
 		return;
 	}
 	const targets = reachFrom(item, reach);
@@ -1279,10 +1326,9 @@ function useTreeView({
 
 	const {
 		childrenKey,
-		collapsedKey,
-		collapsedParentsKey,
-		initCollapsedChildren,
-		setAllCollapsed,
+		isFolded,
+		isFoldedAway,
+		openTo,
 		setCollapsed,
 		resetFolds,
 		ownFolds,
@@ -1308,10 +1354,10 @@ function useTreeView({
 		itemDepth,
 		itemParent,
 		childrenKey,
-		collapsedKey,
-		collapsedParentsKey,
+		isFolded,
+		isFoldedAway,
 		onSortUpdate,
-		setAllCollapsed,
+		openTo,
 		setCollapsed,
 		resetFolds,
 		ownFolds,
@@ -1324,7 +1370,6 @@ function useTreeView({
 			return;
 		}
 		internalItems.value = placementRows();
-		initCollapsedChildren();
 		if (!props.manualOrder && sortValuesOutOfStep())
 			save({ sort: true, parent: null });
 	}
@@ -1375,8 +1420,6 @@ function useTreeView({
 				[itemParent]: placement.parentKey,
 				[itemDepth]: placement.depth,
 				[childrenKey]: placement.descendants,
-				[collapsedKey]: false,
-				[collapsedParentsKey]: [],
 				'--full': placement.full,
 				'--mirror': placement.mirror,
 				'--loop': placement.loop,
@@ -1450,100 +1493,79 @@ function useTreeView({
 
 	/** A drop: the rows are already where they were dropped; the new graph redraws them once saved */
 	function onSortUpdate(update: SortUpdateParams) {
+		// Dropped into a row, that row opens: one past the starting depth would fold it away
+		if (update.parent?.parent != null)
+			setCollapsed([update.parent.parent], false);
 		save(update);
 	}
 
 	function useCollapsible() {
 		const childrenKey = '--children';
-		const collapsedKey = '--collapsed';
-		const collapsedParentsKey = '--collapsed-parents';
 
 		const { folds } = useFolds(collection.value);
-		// A click here, the sidebar's reset, another tab, or a new starting depth
-		watch([folds, () => props.openDepth], () => {
-			if (treeViewAble.value)
-				initCollapsedChildren();
+
+		/**
+		 * Which rows are folded, and which a fold above hides, in one pass down the rows: a parent's
+		 * row always comes before its children's. Worked out here rather than marked on each row, as
+		 * marking every row inside every fold made each fold cost a reactive write per row and level.
+		 */
+		const foldState = computed(() => {
+			const folded = new Set<PrimaryKey>();
+			const hidden = new Set<PrimaryKey>();
+			if (!treeViewAble.value)
+				return { folded, hidden };
+			// Every change replaces the folds whole, so reading them raw tracks them once rather than per row
+			const own = toRaw(folds.value.rows);
+			const depth = startDepth();
+			for (const item of internalItems.value) {
+				const key = item[rowKey];
+				const parent = item[itemParent];
+				if (parent != null && (folded.has(parent) || hidden.has(parent)))
+					hidden.add(key);
+				if (item[childrenKey]?.length && (own[key] ?? isCollapsedByDepth(item, depth)))
+					folded.add(key);
+			}
+			return { folded, hidden };
 		});
 
 		return {
 			childrenKey,
-			collapsedKey,
-			collapsedParentsKey,
-			initCollapsedChildren,
-			setAllCollapsed,
+			isFolded: (item: Item) => foldState.value.folded.has(item[rowKey]),
+			isFoldedAway: (item: Item) => foldState.value.hidden.has(item[rowKey]),
+			openTo,
 			setCollapsed,
 			// Back to the starting depth: every fold of your own forgotten
-			resetFolds: () => (folds.value = {}),
-			ownFolds: computed(() => Object.keys(folds.value).length > 0),
+			resetFolds: () => (folds.value = { rows: {} }),
+			ownFolds: computed(() => folds.value.depth !== undefined || Object.keys(folds.value.rows).length > 0),
 		};
-
-		/** The item's own fold if you've set one, otherwise the starting depth's */
-		function isCollapsed(item: Item) {
-			return folds.value[item[rowKey]] ?? isCollapsedByDepth(item);
-		}
 
 		/** Folds or unfolds these items together, storing only where that differs from the starting depth */
 		function setCollapsed(ids: PrimaryKey[], fold: boolean) {
 			const targets = new Set(ids);
-			const next = { ...folds.value };
+			const rows = { ...folds.value.rows };
 			for (const item of internalItems.value) {
 				if (!targets.has(item[rowKey]))
 					continue;
-				delete next[item[rowKey]];
+				delete rows[item[rowKey]];
 				if (isCollapsedByDepth(item) !== fold)
-					next[item[rowKey]] = fold;
+					rows[item[rowKey]] = fold;
 			}
-			// The watch on `folds` works out what that hides
-			folds.value = next;
+			folds.value = { ...folds.value, rows };
 		}
 
-		/** Levels shallower than `openDepth` start open; none set, everything does */
-		function isCollapsedByDepth(item: Item) {
-			return props.openDepth != null && (item[itemDepth] ?? 0) >= props.openDepth;
+		/** The depth everything was last opened to, or else `openDepth`; null, all of it */
+		function startDepth() {
+			return folds.value.depth !== undefined ? folds.value.depth : props.openDepth;
 		}
 
-		/** Only this page's items are known, so this leaves other pages' folds as they are */
-		function setAllCollapsed(fold: boolean) {
-			setCollapsed(
-				internalItems.value
-					.filter((item) => item[childrenKey]?.length)
-					.map((item) => item[rowKey] as PrimaryKey),
-				fold,
-			);
+		/** Levels shallower than the starting depth are open */
+		function isCollapsedByDepth(item: Item, depth = startDepth()) {
+			return depth != null && (item[itemDepth] ?? 0) >= depth;
 		}
 
-		/** Works out afresh which items are folded and which rows that hides */
-		function initCollapsedChildren() {
-			const byId = new Map(internalItems.value.map((item) => [item[rowKey], item]));
-			for (const item of internalItems.value) {
-				item[collapsedKey] = !!item[childrenKey]?.length && isCollapsed(item);
-				item[collapsedParentsKey] = [];
-			}
-			for (const item of internalItems.value) {
-				if (item[collapsedKey])
-					collapseChildren(item[rowKey], item[childrenKey], byId);
-			}
-		}
-
-		function collapseChildren(
-			id: PrimaryKey,
-			childrenIds: PrimaryKey[],
-			byId = new Map(internalItems.value.map((item) => [item[rowKey], item])),
-		) {
-			for (const childItem of childrenIds.map((childId) => byId.get(childId)).filter((child): child is Item => !!child)) {
-				const parentIndex =
-                            childItem[collapsedParentsKey]?.indexOf(id);
-
-				if (parentIndex > -1) {
-					childItem[collapsedParentsKey].splice(
-						parentIndex,
-						1,
-					);
-				}
-				else {
-					childItem[collapsedParentsKey].push(id);
-				}
-			}
+		/** Everything open down to `depth` (null: all of it) and folded below, whatever was folded before */
+		function openTo(depth: number | null) {
+			folds.value = { depth, rows: {} };
 		}
 	}
 }
@@ -1554,6 +1576,7 @@ function useTreeView({
 		ref="tableRoot"
 		class="v-table"
 		:class="{ loading, inline, disabled, 'click-selects': clickSelects, keyed, 'alt-held': reachHeld === 'siblings' }"
+		:style="sizeVars"
 	>
 		<!-- Focused itself for the keyboard: Directus draws the wrapper as display: contents, which can't be -->
 		<table
@@ -1665,6 +1688,7 @@ function useTreeView({
 					}"
 					v-model:items="internalItems"
 					v-model:depth-change-max="depthChangeMax"
+					v-model:held="held"
 					:item-key="rowKey"
 					:shown="drawnOnly"
 					:root="animated ? tableRoot : null"
@@ -1701,7 +1725,9 @@ function useTreeView({
 						@mouseover.prevent="onDragOver"
 						:class="arriving.has(item[rowKey]) ? 'arriving' : undefined"
 						:fold-target="foldTargets.has(item[rowKey])"
-						:guides="guidesById.get(item[rowKey])"
+						:guide-through="guidesById.get(item[rowKey])?.through"
+						:guide-ends="guidesById.get(item[rowKey])?.ends"
+						:guide-stub="guidesById.get(item[rowKey])?.stub"
 						:divider-inset="guideJoins.insets.has(item[rowKey])"
 						:guides-continue="guideJoins.continuing.has(item[rowKey])"
 						:guide-corners="guideJoins.cornersBelow.get(item[rowKey])"
@@ -1753,19 +1779,16 @@ table {
 	border-spacing: 0;
 }
 
-/* Set once here rather than with v-bind() in each row: that runs a query over the whole page every
-   time a row redraws, and Directus redraws every row a few times whenever the sidebar opens */
+/* Set on the table's root (see `sizeVars`) rather than with v-bind(), which runs a query over the
+   whole page each time the component holding it redraws */
 table tbody {
-	--grid-columns: v-bind(columnStyle.rows);
-	--tree-table-row-height: v-bind(rowHeights.row);
-	--tree-table-image-height: v-bind(rowHeights.image);
-	--tree-table-leaf-mark-height: v-bind(rowHeights.leafMark);
+	--grid-columns: var(--tree-table-row-columns);
 
 	display: contents;
 }
 
 table :deep(thead) {
-	--grid-columns: v-bind(columnStyle.header);
+	--grid-columns: var(--tree-table-header-columns);
 
 	display: contents;
 }
@@ -1987,8 +2010,5 @@ table :deep(.cell.controls .manual),
 table :deep(.cell.controls .select),
 table :deep(.cell.controls .collapse) {
 	margin: 0 2px;
-}
-table :deep(.depth-spacer) {
-	width: v-bind(controlIconWidthCSS);
 }
 </style>

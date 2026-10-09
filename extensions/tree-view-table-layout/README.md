@@ -8,7 +8,7 @@ A tree view layout that allows you to nest items within a table.
 
 Refer to the [Official Guide](https://docs.directus.io/extensions/installing-extensions.html) for details on installing the extension from the Marketplace or manually.
 
-Once installed, go to your collection page, on the `Layout Options` tab in the sidebar, select `Tree View Table` from the `Layout` drop-down list.
+Once installed, go to your collection page, on the `Layout Options` tab in the sidebar, select `Polyhierarchies` from the `Layout` drop-down list.
 
 ### Layout Options
 

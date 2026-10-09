@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ModelRef, Ref } from 'vue';
-import { computed, nextTick, provide, ref } from 'vue';
+import { computed, nextTick, provide, ref, watch } from 'vue';
 
     type Item = Record<string, any>;
     type ItemID = string | number;
@@ -41,10 +41,17 @@ const depthChangeMax = defineModel<number>('depthChangeMax', {
 	default: 0,
 });
 
+/** While a row is dragged, the parent it would land under if dropped now, so its guides can be drawn from there */
+const held = defineModel<{ key: ItemID; parent: ItemID | null } | null>('held', { default: null });
+
 const nestable = computed(() => itemParent !== null);
 
-const { draggedChildrenIds, onSortStart, onDragOver, isSorting, getDepth } =
+const { draggedChildrenSet, onSortStart, onDragOver, isSorting, getDepth, landing } =
         useSortable({ items: items as ModelRef<Item[]>, depthChangeMax, snapStep, nestable });
+watch(landing, (now) => {
+	if (now?.key !== held.value?.key || now?.parent !== held.value?.parent)
+		held.value = now;
+});
 
 provide('sortable', { onSortStart, nestable });
 
@@ -79,14 +86,28 @@ function useSortable({
 	const settling = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
 	const initialX = ref(0);
 	const intendedDepthChange = ref(0);
+	const landing = computed(() =>
+		draggedItemId.value === null || draggedItemIndex.value === null || !nestable.value
+			? null
+			: { key: draggedItemId.value, parent: landingParent() },
+	);
 
 	return {
-		draggedChildrenIds,
+		draggedChildrenSet,
 		onSortStart,
 		onDragOver,
 		isSorting,
 		getDepth,
+		landing,
 	};
+
+	/** The row it would land under, dropped now: the nearest above it that's less deep than it'd be */
+	function landingParent(): ItemID | null {
+		let at = draggedItemIndex.value! - 1;
+		while (at >= 0 && items.value[at]![itemDepth] >= intendedDepthChange.value)
+			at--;
+		return at >= 0 ? items.value[at]![itemKey] : null;
+	}
 
 	function isSorting(id: ItemID) {
 		return draggedItemId.value === id;
@@ -317,35 +338,12 @@ function useSortable({
 		}
 
 		function updateDraggedChildrenDepth() {
-			if (draggedChildrenIds.value) {
-				for (const childId of draggedChildrenIds.value) {
-					const child = items.value.find(
-						(item) => item[itemKey] === childId,
-					);
-
-					if (!child)
-						continue;
-
-					child[itemDepth] += draggedItemDepthOffset.value;
-				}
-			}
+			for (const child of draggedChildren.value)
+				child[itemDepth] += draggedItemDepthOffset.value;
 		}
 
 		function updateParent() {
-			let parentId = null;
-			let parentIndex = draggedItemIndex.value! - 1;
-
-			while (
-				parentIndex >= 0
-				&& items.value[parentIndex]![itemDepth]
-				>= intendedDepthChange.value
-			) {
-				parentIndex--;
-			}
-
-			if (parentIndex >= 0) {
-				parentId = items.value[parentIndex]![itemKey];
-			}
+			const parentId = landingParent();
 
 			if (
 				items.value[draggedItemIndex.value!]![itemParent!]
@@ -386,7 +384,7 @@ function useSortable({
 		:key="item[itemKey]"
 		:item="item"
 		:selected="isSorting(item[itemKey])"
-		:parent-selected="draggedChildrenIds?.includes(item[itemKey])"
+		:parent-selected="draggedChildrenSet.has(item[itemKey])"
 		:on-drag-over="() => onDragOver(item[itemKey])"
 		:current-depth="getDepth(item)"
 	/>
