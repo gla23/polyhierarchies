@@ -476,6 +476,17 @@ const ready = computed(() =>
 			</div>
 		</v-detail>
 	</template>
+
+	<a
+		class="about"
+		href="https://gla23.github.io/polyhierarchies/"
+		target="_blank"
+		rel="noopener"
+	>
+		<v-icon name="help_outline" small />
+		What this layout can do, with examples
+		<v-icon name="open_in_new" x-small />
+	</a>
 </template>
 
 <style lang="scss" scoped>
@@ -549,6 +560,19 @@ const ready = computed(() =>
 
 .reset-folds {
 	margin-top: 8px;
+}
+
+.about {
+	grid-column: 1 / -1;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--theme--foreground-subdued);
+	font-size: 13px;
+
+	&:hover {
+		color: var(--theme--primary);
+	}
 }
 
 /* A note of its own per line, where a field has two */

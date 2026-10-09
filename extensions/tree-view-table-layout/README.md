@@ -1,26 +1,23 @@
-# Tree View Table Layout
+# Polyhierarchies layout for Directus
 
-A tree view layout that allows you to nest items within a table.
+A tree table layout for both a **taxonomy** (one parent each, through a many-to-one field) and a
+**polyhierarchy** (any number of parents, through a links collection). Grown from Directus Labs'
+[Tree View Table Layout](https://github.com/directus-labs/extensions/tree/main/packages/tree-view-table-layout).
 
-![Demo of the Tree View Table Layout](https://raw.githubusercontent.com/directus-labs/extensions/main/packages/tree-view-table-layout/docs/demo.gif)
+What it can do, and why, is in the [repo's README](../../README.md) and, with live examples, at
+[gla23.github.io/polyhierarchies](https://gla23.github.io/polyhierarchies/).
 
 ## Installation
 
-Refer to the [Official Guide](https://docs.directus.io/extensions/installing-extensions.html) for details on installing the extension from the Marketplace or manually.
+Build it from the repo root with `bun run build`, then copy this folder's `package.json` and
+`dist/` into your Directus `extensions` folder. On a collection's page, choose **Polyhierarchies**
+from the layout drop-down, then set the hierarchy up in the layout options:
 
-Once installed, go to your collection page, on the `Layout Options` tab in the sidebar, select `Polyhierarchies` from the `Layout` drop-down list.
+- **Taxonomy**: choose a many-to-one field that points at the same collection. With the
+  collection's sort field set too, rows can be dragged into place.
+- **Polyhierarchy**: choose a links collection, one with two many-to-one fields pointing at this
+  collection (a many-to-many from the collection to itself makes one). An integer field on the
+  links lets each item have its own place under each parent.
 
-### Layout Options
-
-`Parent (M2O)`: Select a M2O field that references the same collection. Create one if it is not listed. Note that the select field only appears if you have specified a `sort` field in your collections data model settings!
-
-`Spacing`: Change the spacing of the spreadsheet rows as you would in the default table layout.
-
-## Usage
-
-To use the Tree View Table features, make sure the `Parent (M2O)` field is set correctly and manual sorting is enabled! Use the drag handles to change the order of your items and move them horizontally to nest items. When you nest an item, a collapse button appears.
-
-### Things to note
-
--   The sort event is not fired with this implementation, but instead you could listen for an update event on the `sort` or `parent` fields via a hook extension or flow.
--   This implementation does not support touch devices as of this writing.
+Moves are saved as updates to the sort, parent or links fields, so a hook or flow can listen for
+those.
