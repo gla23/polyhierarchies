@@ -25,3 +25,8 @@ export interface Sort {
 	by: string | null;
 	desc: boolean;
 }
+
+/** As Directus's own: a row's checkbox, a radio for picking one, or neither */
+export type ShowSelect = 'none' | 'one' | 'multiple';
+
+export type PrimaryKey = string | number;

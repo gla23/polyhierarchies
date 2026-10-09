@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import ExploreLink from '../components/ExploreLink.vue';
+import { concepts } from './concepts';
 import { sections, type PriorArtEntry, type Shot } from './priorArt';
+
+const conceptTitle = (id: string) => concepts.find((concept) => concept.id === id)?.title ?? id;
 
 type Part = { text: string; href?: string; code?: boolean };
 
@@ -61,12 +65,29 @@ const onScroll = () => (frame ||= requestAnimationFrame(measure));
 onMounted(() => {
 	scroller = root.value?.parentElement ?? null;
 	scroller?.addEventListener('scroll', onScroll, { passive: true });
+	scrollToLinkedEntry();
 	measure();
 });
 onBeforeUnmount(() => {
 	scroller?.removeEventListener('scroll', onScroll);
 	cancelAnimationFrame(frame);
 });
+/**
+ * A link to one entry, from a concept page. Arriving from another page, the layout above the entry
+ * is still settling when this runs and a single jump lands short, so it's repeated whenever the
+ * page changes size for a moment, unless the reader starts scrolling first.
+ */
+function scrollToLinkedEntry() {
+	const target = location.hash ? document.getElementById(location.hash.slice(1)) : null;
+	if (!target || !root.value) return;
+	const observer = new ResizeObserver(() => target.scrollIntoView());
+	observer.observe(root.value);
+	const stop = () => observer.disconnect();
+	setTimeout(stop, 1500);
+	scroller?.addEventListener('wheel', stop, { once: true, passive: true });
+	scroller?.addEventListener('touchstart', stop, { once: true, passive: true });
+}
+
 function jump(name: string) {
 	document.getElementById(slug(name))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -92,7 +113,7 @@ function onDialogClick(event: MouseEvent) {
 				<div v-for="entry in section.entries" :id="slug(entry.name)" :key="entry.name" class="entry">
 					<figure v-if="hero(entry)" class="hero">
 						<button type="button" class="shot" :title="'View full size'" @click="view(hero(entry)!)">
-							<img :src="url(hero(entry)!)" :alt="hero(entry)!.alt" loading="lazy" />
+							<img :src="url(hero(entry)!)" :alt="hero(entry)!.alt" :width="hero(entry)!.width" :height="hero(entry)!.height" loading="lazy" />
 						</button>
 						<figcaption>{{ hero(entry)!.caption }}</figcaption>
 					</figure>
@@ -105,12 +126,19 @@ function onDialogClick(event: MouseEvent) {
 							{{ point }}
 							<figure v-for="shot in shotsFor(entry, index)" :key="shot.src" class="inline">
 								<button type="button" class="shot" title="View full size" @click="view(shot)">
-									<img :src="url(shot)" :alt="shot.alt" loading="lazy" />
+									<img :src="url(shot)" :alt="shot.alt" :width="shot.width" :height="shot.height" loading="lazy" />
 								</button>
 								<figcaption>{{ shot.caption }}</figcaption>
 							</figure>
 						</li>
 					</ul>
+					<p v-if="entry.concepts?.length" class="related">
+						Concepts:
+						<template v-for="(id, index) in entry.concepts" :key="id">
+							<ExploreLink :to="{ page: id }">{{ conceptTitle(id) }}</ExploreLink
+							><template v-if="index < entry.concepts.length - 1"> · </template>
+						</template>
+					</p>
 					<button
 						type="button"
 						class="walkthrough-toggle"
@@ -359,6 +387,16 @@ ol {
 
 li + li {
 	margin-top: 6px;
+}
+
+.related {
+	margin: 10px 0 0;
+	font-size: 13px;
+	color: var(--theme--foreground-subdued);
+}
+
+.related a {
+	color: var(--theme--primary);
 }
 
 .walkthrough-toggle {

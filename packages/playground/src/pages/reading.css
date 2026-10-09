@@ -1,0 +1,50 @@
+/* The concept pages' shared look, matching the older reading pages' scoped styles */
+.concept {
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 32px 24px 40px;
+	line-height: 1.6;
+}
+
+.concept h1 {
+	margin: 0 0 8px;
+	font-size: 26px;
+	font-weight: 600;
+	color: var(--theme--foreground-accent);
+}
+
+.concept .lede {
+	font-size: 16px;
+	color: var(--theme--foreground-subdued);
+}
+
+.concept h2 {
+	margin: 32px 0 8px;
+	font-size: 17px;
+	font-weight: 600;
+	color: var(--theme--foreground-accent);
+}
+
+.concept li + li {
+	margin-top: 8px;
+}
+
+.concept strong {
+	font-weight: 600;
+	color: var(--theme--foreground-accent);
+}
+
+.concept a {
+	color: var(--theme--primary);
+}
+
+/* A row of controls above a demo, labelled like Explore's */
+.concept .demo-controls {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 16px;
+	margin-top: 16px;
+	font-size: 12px;
+	color: var(--theme--foreground-subdued);
+}

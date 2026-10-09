@@ -51,6 +51,8 @@ function draw() {
 	const tier = tiers[props.density];
 	const svg = d3.select(svgElement.value!);
 	svg.selectAll('*').remove();
+	// Taken before the zoom is re-attached below, which resets it to the identity
+	const view = d3.zoomTransform(svgElement.value!);
 
 	const redrawing = positions.size > 0;
 	const nodes: SimNode[] = graph.data.nodes.map((node) => ({
@@ -102,7 +104,11 @@ function draw() {
 	const zoom = d3
 		.zoom<SVGSVGElement, unknown>()
 		.scaleExtent([0.05, 2])
-		.on('zoom', (event) => content.attr('transform', event.transform));
+		.on('zoom', (event) => {
+			content.attr('transform', event.transform);
+			// Names fade out as you zoom out, so a big graph reads as a shape, as Obsidian's does
+			content.style('--label-opacity', String(Math.max(0, Math.min(1, (event.transform.k - 0.45) * 2.5))));
+		});
 	// Double-click is for adding a node here, not zooming
 	svg.call(zoom).on('dblclick.zoom', null);
 
@@ -175,6 +181,8 @@ function draw() {
 		.join('g')
 		.attr('class', 'node')
 		.on('click', (_event, node) => (focus.value = node.id))
+		.on('mouseenter', (_event, node) => highlight(node.id))
+		.on('mouseleave', () => highlight())
 		.on('dblclick', (event: MouseEvent, node) => {
 			event.stopPropagation();
 			editor?.open(node.id);
@@ -269,7 +277,7 @@ function draw() {
 	const live = animates(props.motion, nodes.length, 500);
 	if (redrawing) {
 		// Keep the view where it was: only what changed has to settle
-		content.attr('transform', d3.zoomTransform(svgElement.value!).toString());
+		svg.call(zoom.transform, view);
 		if (live) simulation.alpha(0.3);
 		else simulation.alpha(0.3).tick(60);
 	} else {
@@ -306,17 +314,19 @@ function fit(
 	);
 }
 
-/** Focus and its neighbours stand out without redrawing, so moving the focus keeps the layout */
-function highlight() {
-	const id = focus.value;
+/**
+ * Focus and its neighbours stand out without redrawing, so moving the focus keeps the layout. A
+ * hovered node does the same while the pointer is on it.
+ */
+function highlight(id = focus.value) {
 	const near = new Set(
 		id ? [id, ...props.graph.parents(id), ...props.graph.children(id), ...props.graph.jumps(id)] : []
 	);
 	const svg = d3.select(svgElement.value!);
 	svg
 		.selectAll<SVGGElement, SimNode>('.node')
-		.classed('current', (node) => node.id === id)
-		.classed('near', (node) => near.has(node.id) && node.id !== id)
+		.classed('current', (node) => node.id === focus.value)
+		.classed('near', (node) => near.has(node.id) && node.id !== focus.value)
 		.classed('far', (node) => Boolean(id) && !near.has(node.id));
 	const lit = (link: SimLink) =>
 		(link.source as SimNode).id === id || (link.target as SimNode).id === id;
@@ -419,6 +429,7 @@ onBeforeUnmount(() => simulation?.stop());
 }
 
 .force-graph :deep(.node text) {
+	opacity: var(--label-opacity, 1);
 	font-size: 12px;
 	fill: var(--theme--foreground);
 	text-anchor: middle;
@@ -432,6 +443,12 @@ onBeforeUnmount(() => simulation?.stop());
 
 .force-graph :deep(.node.near rect) {
 	stroke: var(--theme--primary);
+}
+
+/* Whatever you're looking at is always named, however far out */
+.force-graph :deep(.node.current text),
+.force-graph :deep(.node.near text) {
+	opacity: 1;
 }
 
 .force-graph :deep(.node.far) {

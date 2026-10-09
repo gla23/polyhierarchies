@@ -98,6 +98,18 @@ const anchor = (slot: Slot, id: string) => (element: unknown) => {
 
 const paths = ref<{ d: string; kind: Link['kind']; ends: string[] }[]>([]);
 const hovered = ref<string | null>(null);
+/**
+ * TheBrain's trick: hovering a parent lights the siblings you share through it, and hovering a
+ * sibling lights the parent it came through, so it's plain why siblings are grouped as they are.
+ */
+const litVia = computed(
+	() =>
+		new Set(
+			siblingGroups.value
+				.filter((group) => group.via === hovered.value || group.siblings.includes(hovered.value!))
+				.map((group) => group.via)
+		)
+);
 
 function point([slot, id, side]: [Slot, string, Side], origin: DOMRect) {
 	const rect = anchors.get(`${slot}:${id}`)?.getBoundingClientRect();
@@ -203,7 +215,7 @@ const isolated = computed(() => !up.value.length && !down.value.length && !jumps
 				:graph="graph"
 				:id="id"
 				:style="transitionName(id)"
-				:echo="hovered === id"
+				:echo="hovered === id || (distance === up.length - 1 && litVia.has(id))"
 				@click="pick(id)"
 				@mouseenter="hovered = id"
 				@mouseleave="hovered = null"
@@ -245,7 +257,12 @@ const isolated = computed(() => !up.value.length && !down.value.length && !jumps
 				</div>
 			</div>
 			<div class="siblings">
-				<div v-for="group in siblingGroups" :key="group.via" class="group">
+				<div
+					v-for="group in siblingGroups"
+					:key="group.via"
+					class="group"
+					:class="{ lit: litVia.has(group.via) }"
+				>
 					<span class="via">via {{ graph.label(group.via) }}</span>
 					<NodeButton
 						v-for="id in group.siblings"
@@ -254,7 +271,7 @@ const isolated = computed(() => !up.value.length && !down.value.length && !jumps
 						:graph="graph"
 						:id="id"
 						:style="transitionName(id)"
-						:echo="hovered === id"
+						:echo="hovered === id || hovered === group.via"
 						@click="pick(id)"
 						@mouseenter="hovered = id"
 						@mouseleave="hovered = null"
@@ -414,5 +431,9 @@ const isolated = computed(() => !up.value.length && !down.value.length && !jumps
 	width: 100%;
 	font-size: 0.75em;
 	color: var(--theme--foreground-subdued);
+}
+
+.group.lit .via {
+	color: var(--theme--primary);
 }
 </style>

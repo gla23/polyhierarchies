@@ -29,6 +29,10 @@
 	--theme--form--field--input--foreground: #4f5464;
 	--theme--form--field--input--padding: 0.875rem;
 	--theme--popover--menu--background: #fafcfd;
+	/* Not theme variables, but Directus's components use them, so the shared table does too */
+	--transition: cubic-bezier(0.4, 0, 0.2, 1);
+	--fast: 125ms;
+	--content-padding: 32px;
 	--icon-size-default: 1.25rem;
 	color-scheme: light;
 }

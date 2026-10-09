@@ -4,6 +4,7 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
+		"./table": "./src/table.ts",
 		"./theme.css": "./src/theme.css"
 	},
 	"scripts": {
@@ -11,7 +12,8 @@
 	},
 	"dependencies": {
 		"@polyhierarchies/core": "workspace:*",
-		"d3": "^7.9.0"
+		"d3": "^7.9.0",
+		"vuedraggable": "4.1.0"
 	},
 	"devDependencies": {
 		"@types/d3": "^7.4.3"

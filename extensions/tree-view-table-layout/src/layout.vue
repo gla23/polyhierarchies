@@ -4,7 +4,8 @@ import type { ShowSelect } from '@directus/extensions';
 import type { Field, Filter, Item } from '@directus/types';
 import type { ComponentPublicInstance, Ref } from 'vue';
 // CORE CLONES
-import type { HeaderRaw } from './core-clones/components/v-table/types';
+import type { Component } from 'vue';
+import type { HeaderRaw } from '@polyhierarchies/ui/table';
 import type { AliasFields } from './core-clones/composables/use-alias-fields';
 import type { Collection } from './core-clones/types/collections';
 import type { TreeEdits } from './types';
@@ -14,7 +15,13 @@ import type { TreeEdits } from './types';
 import { useSync } from '@directus/extensions-sdk';
 import {
 	inject,
+	nextTick,
+	onBeforeUnmount,
+	onMounted,
+	provide,
 	ref,
+	resolveComponent,
+	resolveDirective,
 	toRefs,
 	watch,
 	computed,
@@ -22,7 +29,8 @@ import {
 } from 'vue';
 import { useI18n } from 'vue-i18n';
 // CUSTOMIZED TABLE COMPONENT
-import CustomVTable from './components/v-table.vue';
+import type { Graph } from '@polyhierarchies/core';
+import { TreeTable as CustomVTable, tableKitKey } from '@polyhierarchies/ui/table';
 import { useAliasFields } from './core-clones/composables/use-alias-fields';
 import { usePageSize } from './core-clones/composables/use-page-size';
 import { useShortcut } from './core-clones/composables/use-shortcut';
@@ -81,42 +89,80 @@ interface Props {
 	onSortChange: (newSort: { by: string; desc: boolean }) => void;
 	onAlignChange?: (field: 'string', align: 'left' | 'center' | 'right') => void;
 	parentField: string | null;
-	shiftedColumns: number;
+	hierarchy: 'taxonomy' | 'polyhierarchy';
+	junction: string | null;
+	/** The hierarchy, built by the layout's setup from the parent field or the junction's links */
+	graph: Graph | null;
+	/** A polyhierarchy orders by its links' own sort, so rows can be dragged however this is sorted */
+	manualOrder: boolean;
+	nodeLabel: (id: string) => string;
+	/** While searching or filtering: the nodes that match, which the table highlights in the tree */
+	matches: Set<string> | null;
+	/** Sorted by a column rather than by the hierarchy: siblings in that order, nothing to drag */
+	columnSorted: boolean;
+	/** Nested, but not draggable: while searching, or sorted by a column */
+	treeReadonly: boolean;
+	/** How highlights show, from the search's or the filter's mode */
+	highlightMode: 'routes' | 'inplace';
+	/** Hide layers: only these nodes stay, with what holds their place */
+	keep: Set<string> | null;
+	/** Drawn as a tree, so loaded whole: no pages, and no page size to choose */
+	treeActive: boolean;
+	/** The column the hierarchy indents, by key; `$controls` for none */
+	treeColumn: string;
 	showGuides: boolean;
 	openDepth: number | null;
+	maxOpenDepth: number | null;
 	saveEdits: (edits: TreeEdits) => void;
+	setShowing: (counts: { items: number; matching: number } | null) => void;
+	/** Which match the table last went to, for the top bar's button, and that button's asking */
+	setMatchPosition: (position: { at: number | null; of: number }) => void;
+	matchJump: { step: 1 | -1; n: number } | null;
 	isFiltered: boolean;
 }
 
 const { t } = useI18n();
+
+// The shared table is drawn with Directus's own checkbox, icons, menu and tooltips
+provide(tableKitKey, {
+	VCheckbox: resolveComponent('v-checkbox') as Component,
+	VIcon: resolveComponent('v-icon') as Component,
+	VMenu: resolveComponent('v-menu') as Component,
+	VTextOverflow: resolveComponent('v-text-overflow') as Component,
+	VProgressLinear: resolveComponent('v-progress-linear') as Component,
+	ValueNull: resolveComponent('value-null') as Component,
+	vTooltip: resolveDirective('tooltip')!,
+	t: (key: string) => t(key),
+});
 const { collection } = toRefs(props);
+
+/**
+ * The hierarchy as a graph, for the table to draw by placement: here each item names its one parent,
+ * so every node has one placement, but the table draws a node with several the same way.
+ */
+
 
 // CORE CHANGE
 const system = inject<Record<string, any>>('system')!;
 
 // CORE CHANGES
-const { sortAllowed } = useCollectionPermissions(collection);
+const { sortAllowed, linksEditable } = useCollectionPermissions(collection);
 
 /**
- * Why a collection with a parent field is showing flat. The hierarchy only shows while sorting
- * manually, which isn't obvious, and not at all while searching or filtering, as a filtered list can
- * leave items without their parents.
+ * Why rows can't be dragged right now. The tree stays while searching (the matches are highlighted
+ * in it) and while sorted by a column (siblings come in that order), but a drag would have nowhere
+ * sensible to put a row, so it waits for the hierarchy's own order.
  */
 const hierarchyHint = computed(() => {
-	if (!props.parentField || !props.sortField || !sortAllowed.value)
+	if (!props.graph || props.isFiltered)
 		return null;
-	if (props.isFiltered)
-		return "The hierarchy can't be displayed while searching or filtering.";
-	if (props.tableSort?.by !== props.sortField)
-		return "You are sorting by another column, so the hierarchy is hidden and items can't be dragged into place.";
+	if (props.columnSorted)
+		return 'Sorted by a column: siblings are in that order, and rows can\'t be dragged into place until it\'s sorted by the hierarchy again.';
 	return null;
 });
 
 function showHierarchy() {
-	if (props.isFiltered)
-		props.clearFilters?.();
-	if (props.sortField)
-		props.onSortChange({ by: props.sortField, desc: false });
+	props.onSortChange(props.sortField ? { by: props.sortField, desc: false } : null);
 }
 
 function useCollectionPermissions(collection: Ref<string>) {
@@ -136,7 +182,14 @@ function useCollectionPermissions(collection: Ref<string>) {
 		return permission.fields.includes('*') || permission.fields.includes(props.sortField);
 	});
 
-	return { sortAllowed };
+	/** In a polyhierarchy, dragging edits the links, so it's the junction's permissions that count */
+	const linksEditable = computed(() => {
+		if (!props.junction) return false;
+		if (userStore.isAdmin) return true;
+		return !!permissionsStore.getPermission(props.junction, 'update') || !!permissionsStore.getPermission(props.junction, 'create');
+	});
+
+	return { sortAllowed, linksEditable };
 }
 
 const selectionWritable = useSync(props, 'selection', emit);
@@ -145,7 +198,89 @@ const limitWritable = useSync(props, 'limit', emit);
 
 const mainElement = inject<Ref<Element | undefined>>('main-element');
 
-const table = ref<ComponentPublicInstance>();
+const table = ref<ComponentPublicInstance & { goToMatch?: (step: 1 | -1) => void }>();
+const layoutRoot = ref<HTMLElement>();
+
+watch(() => props.matchJump, (jump) => jump && table.value?.goToMatch?.(jump.step));
+
+/**
+ * The search box Directus draws for this view: the drawer's, when picking items, else the page's,
+ * but not while a drawer covers the page. Several drawers, only the top one's.
+ */
+function ownSearch() {
+	const drawers = [...document.querySelectorAll('.v-drawer')];
+	const drawer = layoutRoot.value?.closest('.v-drawer');
+	if (drawer ? drawer !== drawers.at(-1) : drawers.length)
+		return null;
+	return (drawer ?? document).querySelector<HTMLElement>('.search-input');
+}
+
+/** Opened and focused with its text selected, as a find box is; folded away when empty, it opens on a click */
+async function focusSearch(box: HTMLElement) {
+	const input = box.querySelector('input');
+	if (!input)
+		return;
+	if (!input.offsetWidth) {
+		box.querySelector<HTMLElement>('.icon-search')?.click();
+		await nextTick();
+	}
+	input.focus();
+	input.select();
+}
+
+/**
+ * Enter in the search goes to the next match (Shift+Enter, the one before). ⌘/Ctrl-F focuses the
+ * search, as the browser's find can't see the rows drawn without their cells; pressed again from the
+ * search, it's the browser's.
+ */
+let pendingStep: 1 | -1 | null = null;
+let pendingGiveUp: ReturnType<typeof setTimeout> | undefined;
+function onKeydown(event: KeyboardEvent) {
+	const box = ownSearch();
+	const input = box?.querySelector('input');
+	if (!box || !input)
+		return;
+	if (event.key === 'Enter' && event.target === input && !event.isComposing) {
+		event.preventDefault();
+		const step = event.shiftKey ? -1 : 1;
+		// Typed faster than the search follows: go once its matches arrive
+		if (input.value.trim() !== (props.search ?? '').trim()) {
+			pendingStep = step;
+			clearTimeout(pendingGiveUp);
+			pendingGiveUp = setTimeout(() => (pendingStep = null), 3000);
+		}
+		else {
+			table.value?.goToMatch?.(step);
+		}
+	}
+	else if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f') {
+		if (document.activeElement === input)
+			return;
+		event.preventDefault();
+		void focusSearch(box);
+	}
+}
+watch([() => props.matches, () => props.keep], async () => {
+	if (pendingStep === null)
+		return;
+	const step = pendingStep;
+	pendingStep = null;
+	await nextTick();
+	table.value?.goToMatch?.(step);
+});
+
+onMounted(() => {
+	document.addEventListener('keydown', onKeydown);
+	// Opened to pick items: ready to type into, once the drawer has slid in
+	if (layoutRoot.value?.closest('.v-drawer')) {
+		setTimeout(() => {
+			const box = ownSearch();
+			if (box)
+				void focusSearch(box);
+		}, 250);
+	}
+});
+onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
 
 watch(
 	() => props.page,
@@ -191,7 +326,10 @@ function removeField(fieldKey: string) {
 </script>
 
 <template>
-	<div class="custom-layout">
+	<div
+		ref="layoutRoot"
+		class="custom-layout"
+	>
 		<v-notice
 			v-if="hierarchyHint"
 			class="hierarchy-hint"
@@ -200,11 +338,10 @@ function removeField(fieldKey: string) {
 			<div class="hint-body">
 				<span>{{ hierarchyHint }}</span>
 				<v-button
-					v-if="!isFiltered || clearFilters"
 					small
 					@click="showHierarchy"
 				>
-					View hierarchy
+					Sort by the hierarchy
 				</v-button>
 			</div>
 		</v-notice>
@@ -223,18 +360,27 @@ function removeField(fieldKey: string) {
 			:loading="loading"
 			:row-height="tableRowHeight"
 			:item-key="primaryKeyField?.field"
-			:show-manual-sort="sortAllowed && !isFiltered"
+			:show-manual-sort="(manualOrder || treeActive ? (manualOrder ? linksEditable : sortAllowed) : sortAllowed && !isFiltered)"
 			:manual-sort-key="sortField"
 			allow-header-reorder
 			selection-use-keys
-			:parent-field
+			:graph
+			:manual-order
+			:node-label
+			:matches
+			:readonly="treeReadonly"
+			:search-mode="highlightMode"
+			:keep
 			:collection
-			:shifted-columns="shiftedColumns"
+			:tree-column="treeColumn === '$controls' ? null : treeColumn"
 			:show-guides="showGuides"
-			:open-depth="openDepth"
+			:open-depth="openDepth == null || openDepth < 0 ? null : openDepth"
+			:max-open-depth="maxOpenDepth"
 			@click:row="onRowClick"
 			@update:sort="onSortChange"
 			@update:items="saveEdits"
+			@showing="setShowing"
+			@match-position="setMatchPosition"
 		>
 			<template
 				v-for="header in tableHeaders"
@@ -371,7 +517,7 @@ function removeField(fieldKey: string) {
 				<div class="footer">
 					<div class="pagination">
 						<v-pagination
-							v-if="totalPages > 1"
+							v-if="!treeActive && totalPages > 1"
 							:length="totalPages"
 							:total-visible="7"
 							show-first-last
@@ -383,6 +529,7 @@ function removeField(fieldKey: string) {
 					<div
 						v-if="
 							loading === false
+								&& !treeActive
 								&& limit > -1
 								&& (items.length >= 25 || limit < 25)
 						"

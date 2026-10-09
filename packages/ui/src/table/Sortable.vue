@@ -6,11 +6,28 @@ import { computed, provide, ref } from 'vue';
     type ItemID = string | number;
 interface SortUpdateParams {
 	sort: boolean;
+	/** Only when the drop changed the dragged row's parent */
 	parent: { id: ItemID; parent: ItemID | null } | null;
+	/** The row that was dragged, whether or not its parent changed */
+	dragged: ItemID | null;
+	/** Dropped with Alt held: add the new parent rather than move from the old one */
+	link: boolean;
 }
 
-const { itemKey, itemSort, itemDepth, itemParent, snapStep, disabled } =
-        defineProps<{ itemKey: string; itemSort: string; itemDepth: string; itemParent: string | null; snapStep: number; disabled?: boolean }>();
+const { itemKey, itemSort, itemDepth, itemParent, snapStep, disabled, shown } =
+        defineProps<{
+        	itemKey: string;
+        	itemSort: string;
+        	itemDepth: string;
+        	itemParent: string | null;
+        	snapStep: number;
+        	disabled?: boolean;
+        	/** Which rows to draw; all, if not given. The rest stay in `items`, and move with a drag */
+        	shown?: (item: Item) => boolean;
+        }>();
+
+/** Drawn rows only: thousands of hidden ones cost a render each for nothing */
+const drawn = computed(() => (shown ? items.value!.filter(shown) : items.value!));
 
 const emit = defineEmits(['manual-sort']);
 
@@ -114,7 +131,7 @@ function useSortable({
 	function getCurrentDepth() {
 		if (draggedItemIndex.value === null || !nestable.value)
 			return 0;
-		return items.value[draggedItemIndex.value][itemDepth];
+		return items.value[draggedItemIndex.value]![itemDepth];
 	}
 
 	function onSortStart(item: Item, event: MouseEvent) {
@@ -169,7 +186,7 @@ function useSortable({
 			if (nextIndex > maxIndex)
 				return 0;
 
-			return items.value[nextIndex][itemDepth];
+			return items.value[nextIndex]![itemDepth];
 		}
 
 		function getMaxDepth(): number {
@@ -178,12 +195,12 @@ function useSortable({
 			if (parentIndex < 0)
 				return 0;
 
-			const parentDepth = items.value[parentIndex][itemDepth];
+			const parentDepth = items.value[parentIndex]![itemDepth];
 
 			return parentDepth + 1;
 		}
 
-		function between({ min, max, value }) {
+		function between({ min, max, value }: { min: number; max: number; value: number }) {
 			return Math.min(Math.max(value, min), max);
 		}
 	}
@@ -217,10 +234,12 @@ function useSortable({
 		}
 	}
 
-	function onSortEnd() {
+	function onSortEnd(event?: MouseEvent) {
 		const updates: SortUpdateParams = {
 			sort: !!targetItemId.value,
 			parent: null,
+			dragged: draggedItemId.value,
+			link: !!event?.altKey,
 		};
 
 		if (nestable.value) {
@@ -234,7 +253,7 @@ function useSortable({
 		emit('manual-sort', updates);
 
 		function updateDepth() {
-			items.value[draggedItemIndex.value!][itemDepth] =
+			items.value[draggedItemIndex.value!]![itemDepth] =
                     intendedDepthChange.value;
 		}
 
@@ -259,25 +278,25 @@ function useSortable({
 
 			while (
 				parentIndex >= 0
-				&& items.value[parentIndex][itemDepth]
+				&& items.value[parentIndex]![itemDepth]
 				>= intendedDepthChange.value
 			) {
 				parentIndex--;
 			}
 
 			if (parentIndex >= 0) {
-				parentId = items.value[parentIndex][itemKey];
+				parentId = items.value[parentIndex]![itemKey];
 			}
 
 			if (
-				items.value[draggedItemIndex.value!][itemParent!]
+				items.value[draggedItemIndex.value!]![itemParent!]
 				!== parentId
 			) {
-				items.value[draggedItemIndex.value!][itemParent!] =
+				items.value[draggedItemIndex.value!]![itemParent!] =
                         parentId;
 
 				updates.parent = {
-					id: items.value[draggedItemIndex.value!][itemKey!],
+					id: items.value[draggedItemIndex.value!]![itemKey!],
 					parent: parentId,
 				};
 			}
@@ -304,7 +323,7 @@ function useSortable({
 
 <template>
 	<slot
-		v-for="item in items"
+		v-for="item in drawn"
 		:key="item[itemKey]"
 		:item="item"
 		:selected="isSorting(item[itemKey])"

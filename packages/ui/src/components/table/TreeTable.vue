@@ -1,793 +1,266 @@
 <script setup lang="ts">
-import type { FieldValue, Graph } from '@polyhierarchies/core';
-import { computed, onMounted, reactive, ref, toRef, watch } from 'vue';
-import { animates, densityStyles, type Density, type GraphEditor, type Motion } from '../../editing';
-import { useHomesOfFocus } from '../../keyHeld';
-import { useTree, type Repeat, type TreeRow } from '../../tree';
-import { useTreeDrop } from '../../treeDrop';
-import NodeLabel from '../NodeLabel.vue';
-import TreeToolbar from '../TreeToolbar.vue';
-import '../../motion.css';
+import type { Graph } from '@polyhierarchies/core';
+import { computed, provide, reactive, ref } from 'vue';
+import type { Density, GraphEditor, Motion } from '../../editing';
+import { playgroundTableKit } from '../../kit';
+import SharedTreeTable from '../../table/TreeTable.vue';
+import { tableKitKey } from '../../table/kit';
+import type { HeaderRaw, Item } from '../../table/types';
+import type { Repeat } from '../../tree';
+import KitIcon from '../../kit/KitIcon.vue';
+import KitValueNull from '../../kit/KitValueNull.vue';
+import NodeIcon from '../NodeIcon.vue';
 
+/**
+ * The Directus tree view layout itself, given the playground's data: the same component the
+ * extension draws, with look-alikes for its few Directus pieces, and drops turned into `GraphEditor`
+ * moves. What it can't do here is what Directus can't either; the Tree lab is for the rest.
+ */
 const props = withDefaults(
 	defineProps<{
 		graph: Graph;
 		editor?: GraphEditor;
 		density?: Density;
 		motion?: Motion;
-		indent?: number;
 		/** Every other placement as a terminal duplicate, or drawn in full as a mirror */
 		repeat?: Repeat;
-		/** One control that folds when clicked and moves when dragged, or a chevron then a handle */
-		handle?: 'separate' | 'merged';
 		/** The faint lines from an open item's chevron down everything inside it */
 		guides?: 'shown' | 'hidden';
+		/** How many levels start open, as the layout's option; negative opens everything */
+		openDepth?: number | string;
+		/** The column the hierarchy indents: Name, or none, so only the controls indent */
+		treeColumn?: 'label' | 'controls';
+		/**
+		 * While searching: hide what doesn't match (no highlight, folds kept); show the routes to the
+		 * matches; or keep the folds and mark the matches
+		 */
+		searchMode?: 'hide' | 'routes' | 'inplace';
+		/** The most levels Unfold all and a search's routes open, as the layout's option; negative, no limit */
+		maxOpenDepth?: number | string;
 	}>(),
-	{ density: 'cosy', motion: 'auto', indent: 28, repeat: 'once', handle: 'merged', guides: 'shown' }
+	{ density: 'compact', motion: 'auto', repeat: 'once', guides: 'shown', openDepth: 2, treeColumn: 'label', searchMode: 'routes', maxOpenDepth: 5 }
 );
 const focus = defineModel<string | null>('focus', { default: null });
-/** How many columns, from the first, move with the hierarchy (see `template`) */
-const shiftedColumns = defineModel<number>('shiftedColumns', { default: 1 });
 
-const graph = toRef(props, 'graph');
-const tree = useTree(graph, focus, toRef(props, 'repeat'));
-const homes = useHomesOfFocus(graph, focus);
-const drop = useTreeDrop(graph, toRef(props, 'editor'), tree.open);
+provide(tableKitKey, playgroundTableKit);
 
-/** Column keys in the order dragged into; empty until one is, and unknown keys go last */
+/** Directus's three row heights */
+const rowHeights: Record<Density, number> = { compact: 32, cosy: 48, comfortable: 64 };
+
+/** Each node as an item, with its fields alongside and a sort value in the order the dataset gives */
+const items = computed<Item[]>(() =>
+	props.graph.data.nodes.map((node, index) => ({ id: node.id, label: node.label, sort: index + 1, ...node.fields }))
+);
+
+/** Widths and order as dragged, kept here as the layout keeps them in its preset */
+const widths = reactive<Record<string, number>>({});
 const order = ref<string[]>([]);
-const columns = computed(() => {
-	const all = [
-		{ key: 'label', label: 'Name', type: 'label' as const },
-		...(props.graph.data.columns ?? []),
-		{ key: 'parents', label: 'Parents', type: 'parents' as const }
+const headers = computed<HeaderRaw[]>(() => {
+	const all: HeaderRaw[] = [
+		{ text: 'Name', value: 'label' },
+		...(props.graph.data.columns ?? []).map((column) => ({
+			text: column.label,
+			value: column.key,
+			align: column.type === 'number' ? ('right' as const) : ('left' as const)
+		}))
 	];
 	const rank = (key: string) => {
 		const index = order.value.indexOf(key);
 		return index < 0 ? order.value.length : index;
 	};
-	return all.sort((a, b) => rank(a.key) - rank(b.key));
+	return all
+		.sort((a, b) => rank(a.value) - rank(b.value))
+		// Sorting by a column is Directus's query's job; with no query, the hierarchy's order stands
+		.map((header) => ({ ...header, sortable: false, width: widths[header.value] ?? (header.value === 'label' ? 240 : 160) }));
 });
-
-const widths = reactive<Record<string, number>>({});
-const width = (key: string) => widths[key] ?? fitted.value[key] ?? 140;
-const minWidth = 48;
-
-/** Handle (when editable), checkbox and chevron */
-/** Merged only means something while editing: read only, there's no handle to merge */
-const merged = computed(() => props.handle === 'merged' && !!props.editor);
-/** Chevron, handle (when editable and not merged into it) and checkbox */
-const controlsWidth = computed(() => (props.editor && !merged.value ? 28 : 0) + 28 + 28);
-const shifted = computed(() => Math.min(Math.max(0, shiftedColumns.value), columns.value.length));
-
-/** The table's own font, read once it's on the page; until then text is guessed from its length */
-const root = ref<HTMLElement>();
-const font = ref<{ size: number; family: string } | null>(null);
-onMounted(() => {
-	const read = () => {
-		const style = getComputedStyle(root.value!);
-		font.value = { size: parseFloat(style.fontSize), family: style.fontFamily };
-	};
-	read();
-	// Measured before a web font arrives, text is sized in the fallback font
-	void document.fonts?.ready.then(() => root.value && read());
-});
-let context: CanvasRenderingContext2D | null = null;
-function textWidth(text: string, weight = 400) {
-	if (!font.value) return text.length * 7.5;
-	context ??= document.createElement('canvas').getContext('2d')!;
-	context.font = `${weight} ${font.value.size}px ${font.value.family}`;
-	return context.measureText(text).width;
+function onHeaders(next: HeaderRaw[]) {
+	order.value = next.map((header) => header.value);
+	for (const header of next) if (header.width) widths[header.value] = header.width;
 }
 
-/**
- * Each column wide enough for its longest value, within reason, until it's resized by hand. Like
- * the widths Directus stores, it's for the content alone: the room for the indent is added when
- * drawing (see `template`), so changing the indent or the shifted count never resizes a column.
- */
-const fitted = computed(() => {
-	const em = font.value?.size ?? 14;
-	const out: Record<string, number> = {};
-	columns.value.forEach((column) => {
-		const most = column.type === 'label' ? 520 : 320;
-		const content = props.graph.data.nodes.map((node) => {
-			let px: number;
-			if (column.type === 'label') {
-				const parents = props.graph.parents(node.id);
-				// Duplicates and loops only exist of nodes reached more than one way
-				const repeated = parents.length > 1 || (parents.length > 0 && !props.graph.spanningParent(node.id));
-				px =
-					textWidth(node.label) +
-					(node.icon || node.colour ? 1.15 * em + 6 : 0) +
-					(repeated ? 0.9 * em + 6 : 0) +
-					(parents.length > 1 ? 0.75 * em * 2 + 14 : 0);
-			} else if (column.type === 'parents')
-				px = textWidth(props.graph.parents(node.id).map(props.graph.label).join(', '));
-			else px = textWidth(format(node.fields?.[column.key], column.type));
-			return Math.min(most, px);
-		});
-		const natural = Math.max(textWidth(column.label, 600), ...content) + 24 + 8;
-		out[column.key] = Math.ceil(Math.max(minWidth, natural));
-	});
-	return out;
-});
-/** Once everything is unfolded, as Directus reserves for every loaded item, not just those shown */
-const deepest = computed(() =>
-	Math.max(0, ...props.graph.data.nodes.map((node) => tree.deepest(node.id)))
-);
+/** Drawn as Directus's boolean display does, a tick, rather than the word */
+const booleanColumns = computed(() => (props.graph.data.columns ?? []).filter((column) => column.type === 'boolean'));
 
 /**
- * The row's column widths. The controls track grows by the row's indent, pushing the first
- * `shiftedColumns` columns right with it; the last of those shrinks by the same amount, so every
- * column after it starts on one line whatever the depth. It's drawn wider by the deepest indent to
- * give that up from, so every row keeps at least its width, as the Directus layout does. With none
- * shifted, only the controls indent, inside a track wide enough for the deepest row — Directus's
- * own tree view.
+ * Directus's search, here: a node matches when its name or any of its values contains the text. The
+ * table keeps the tree and shows the routes to the matches, as the layout does.
  */
-function template(depth: number) {
-	const indent = depth * props.indent;
-	const lead = shifted.value
-		? controlsWidth.value + indent
-		: controlsWidth.value + deepest.value * props.indent;
-	const tracks = columns.value.map((column, index) =>
-		index === shifted.value - 1
-			? width(column.key) + deepest.value * props.indent - indent
-			: width(column.key)
+const search = ref('');
+const matches = computed(() => {
+	const wanted = search.value.trim().toLowerCase();
+	if (!wanted) return null;
+	return new Set(
+		props.graph.data.nodes
+			.filter((node) => [node.label, ...Object.values(node.fields ?? {})].some((value) => String(value ?? '').toLowerCase().includes(wanted)))
+			.map((node) => node.id)
 	);
-	return [lead, ...tracks].map((px) => `${px}px`).join(' ');
+});
+
+const selection = ref<string[]>([]);
+/** While searching, what the table shows and how much of it matches, as the layout's count says */
+const showing = ref<{ items: number; matching: number } | null>(null);
+/** Enter in the search goes to the next match; the one it's at, as the layout's Next button says */
+const table = ref<InstanceType<typeof SharedTreeTable>>();
+const matchPosition = ref<{ at: number | null; of: number } | null>(null);
+function goToMatch(event?: KeyboardEvent | MouseEvent) {
+	table.value?.goToMatch(event?.shiftKey ? -1 : 1);
 }
+const sort = ref({ by: 'sort', desc: false });
 
-function resize(event: PointerEvent, key: string) {
-	const handle = event.currentTarget as HTMLElement;
-	handle.setPointerCapture(event.pointerId);
-	const startX = event.clientX;
-	const startWidth = width(key);
-	const move = (moved: PointerEvent) =>
-		(widths[key] = Math.max(minWidth, startWidth + moved.clientX - startX));
-	handle.addEventListener('pointermove', move);
-	handle.addEventListener('pointerup', () => handle.removeEventListener('pointermove', move), {
-		once: true
-	});
-}
-
-const moving = ref<string | null>(null);
-
-/**
- * Dragging a heading moves its column to a place where it would sit under the pointer, the nearest
- * if several would, and stays put while it already does. Swapping as soon as the pointer crossed a
- * neighbour would flip a narrow column back and forth across a wide one.
- */
-function reorder(event: PointerEvent, key: string) {
-	const heading = event.currentTarget as HTMLElement;
-	const header = heading.parentElement!;
-	heading.setPointerCapture(event.pointerId);
-	const startX = event.clientX;
-	const move = (moved: PointerEvent) => {
-		if (!moving.value && Math.abs(moved.clientX - startX) < 4) return;
-		moving.value = key;
-		const cells = [...header.querySelectorAll<HTMLElement>('[role="columnheader"]')];
-		const x = moved.clientX - cells[0]!.getBoundingClientRect().left;
-		const own = heading.getBoundingClientRect().width;
-		const others = cells.filter((cell) => cell.dataset.key !== key);
-		const current = cells.indexOf(heading);
-		const under: number[] = [];
-		let start = 0;
-		for (let index = 0; index <= others.length; index++) {
-			if (x >= start && x <= start + own) under.push(index);
-			start += others[index]?.getBoundingClientRect().width ?? 0;
-		}
-		if (!under.length || under.includes(current)) return;
-		const index = under.reduce((a, b) => (Math.abs(b - current) < Math.abs(a - current) ? b : a));
-		const keys = others.map((cell) => cell.dataset.key!);
-		keys.splice(index, 0, key);
-		order.value = keys;
-	};
-	heading.addEventListener('pointermove', move);
-	heading.addEventListener(
-		'pointerup',
-		() => {
-			heading.removeEventListener('pointermove', move);
-			moving.value = null;
-		},
-		{ once: true }
-	);
-}
-
-const selected = reactive(new Set<string>());
-const allSelected = computed(
-	() => tree.rows.value.length > 0 && tree.rows.value.every((row) => selected.has(row.id))
-);
-function toggleAll() {
-	if (allSelected.value) selected.clear();
-	else for (const row of tree.rows.value) selected.add(row.id);
-}
-const toggleSelected = (id: string) => (selected.has(id) ? selected.delete(id) : selected.add(id));
-
-function format(value: FieldValue | undefined, type: string) {
-	if (value === null || value === undefined || value === '') return '';
-	if (type === 'boolean') return value ? '✓' : '–';
-	if (type === 'number' && typeof value === 'number') return value.toLocaleString('en-GB');
-	return String(value);
-}
-
-/**
- * Tree guides: a faint line from under an open item's chevron down everything inside it, curving
- * at the bottom of the last row so it wraps the whole of it; curving mid-row made the last item look
- * half outside. Each row draws its share, a line for every ancestor, so the lines fold with the rows.
- */
-type Guide = { level: number; kind: 'through' | 'end' | 'stub' };
-function guidesOf(row: TreeRow): Guide[] {
-	const guides: Guide[] = [];
-	if (props.guides === 'hidden') return guides;
-	// The row is the last of an ancestor's rows if it's closed and last child all the way down to it
-	let lastBelow = !row.open;
-	for (let level = row.depth - 1; level >= 0; level--) {
-		lastBelow &&= props.graph.children(row.path[level]!).at(-1) === row.path[level + 1];
-		guides.push({ level, kind: lastBelow ? 'end' : 'through' });
-	}
-	if (row.open) guides.push({ level: row.depth, kind: 'stub' });
-	return guides;
-}
-
-/**
- * Where the row's bottom divider starts: after the outermost guide curving into it, so the two join
- * in one stroke, rather than the divider running on past it. The curve ends a chevron's middle
- * (12px) and its reach (the indent less 14px) along from its level.
- */
-function dividerStart(row: TreeRow) {
-	const ends = guidesOf(row).filter((guide) => guide.kind === 'end');
-	if (!ends.length) return undefined;
-	return Math.min(...ends.map((guide) => guide.level)) * props.indent + props.indent - 2;
-}
-
-const fieldOf = (row: TreeRow, key: string) => props.graph.node(row.id).fields?.[key];
-
-/** Clicking a row opens it, as Directus opens the item page; the handle is for moving it */
-function select(row: TreeRow) {
-	focus.value = row.id;
-	props.editor?.open(row.id);
-}
-
-/** Under the focus, or at the top level with none */
-function addNode() {
-	const id = props.editor!.add(focus.value);
+/** A click opens the item, as Directus opens the item page; here that's the focus and the editor */
+function onRowClick({ item }: { item: Item }) {
+	const id = (item['--node'] as string | undefined) ?? (item.id as string);
 	focus.value = id;
-	props.editor!.open(id);
+	props.editor?.open(id);
 }
 
-/** Moving rows animates while there are few enough of them to measure every frame */
-const animated = computed(() => animates(props.motion, tree.rows.value.length, 300));
-
-/**
- * Changing how many columns follow the hierarchy slides the columns to their new widths. That lays
- * out every row each frame, so it's only for that moment (a resize drag stays instant) and only
- * while `animated` allows.
- */
-const reshaping = ref(false);
-let reshaped: ReturnType<typeof setTimeout> | undefined;
-watch(shifted, () => {
-	reshaping.value = true;
-	clearTimeout(reshaped);
-	reshaped = setTimeout(() => (reshaping.value = false), 200);
-});
+type Moved = { node: string; from: string | null; to: string | null; index: number; link: boolean };
+/** A drop moves that placement; with Alt held it adds the new parent and keeps the old */
+function onEdits(edits: { moved?: Moved | null }) {
+	const moved = edits.moved;
+	if (!moved || !props.editor) return;
+	if (moved.link && moved.to) props.editor.link(moved.to, moved.node);
+	else props.editor.move(moved.node, moved.from, moved.to, moved.index);
+}
 </script>
 
 <template>
-	<div ref="root" class="tree-table tree-motion" :class="{ still: !animated, reshaping }" :style="densityStyles[density]">
-		<TreeToolbar :tree="tree" :focus="focus">
-			<span class="stepper" title="Columns that follow the hierarchy">
-				<span class="count">{{ shifted }} {{ shifted === 1 ? 'column' : 'columns' }} indent</span>
-				<button
-					type="button"
-					aria-label="One fewer column follows the hierarchy"
-					:disabled="shifted === 0"
-					@click="shiftedColumns = shifted - 1"
-				>
-					−
-				</button>
-				<button
-					type="button"
-					aria-label="One more column follows the hierarchy"
-					:disabled="shifted === columns.length"
-					@click="shiftedColumns = shifted + 1"
-				>
-					+
-				</button>
-			</span>
-			<button v-if="editor" type="button" class="new" @click="addNode">
-				+ New{{ focus ? ` under ${graph.data.nodes.find((node) => node.id === focus)?.label ?? ''}` : '' }}
-			</button>
-			<span v-if="selected.size" class="selection">
-				{{ selected.size }} selected
-				<button type="button" @click="selected.clear()">Clear</button>
-			</span>
-		</TreeToolbar>
-
-		<div class="table" role="treegrid">
-			<div class="row header" role="row" :style="{ gridTemplateColumns: template(0) }">
-				<div class="cell controls">
-					<span class="icon-button" />
-					<span v-if="editor && !merged" class="handle-space" />
-					<input
-						type="checkbox"
-						aria-label="Select every row"
-						:checked="allSelected"
-						@change="toggleAll"
-					/>
-				</div>
-				<div
-					v-for="column in columns"
-					:key="column.key"
-					class="cell"
-					:class="{ moving: moving === column.key }"
-					role="columnheader"
-					:data-key="column.key"
-					title="Drag to reorder"
-					@pointerdown.prevent="reorder($event, column.key)"
-				>
-					<span class="heading">{{ column.label }}</span>
-					<span
-						class="resizer"
-						title="Drag to resize"
-						@pointerdown.stop.prevent="resize($event, column.key)"
-					/>
-				</div>
-			</div>
-
-			<TransitionGroup :name="animated ? 'tree-fold' : ''" tag="div" class="rows">
-			<div
-				v-for="row in tree.rows.value"
-				:key="row.key"
-				class="row"
-				role="row"
-				:aria-level="row.depth + 1"
-				:aria-expanded="row.hasChildren ? row.open : undefined"
-				:class="[
-					{
-						current: row.full && focus === row.id,
-						selected: selected.has(row.id),
-						duplicate: !row.full,
-						loop: row.loop,
-						dragging: drop.dragging.value?.key === row.key,
-						landed: drop.landed.value === row.id,
-						home: homes.has(row.id)
-					},
-					drop.zoneOf(row) && `drop-${drop.zoneOf(row)}`
-				]"
-				:style="{
-					gridTemplateColumns: template(row.depth),
-					'--divider-start': dividerStart(row) === undefined ? undefined : `${dividerStart(row)}px`
-				}"
-				:data-divider-inset="dividerStart(row) !== undefined || undefined"
-				@click="select(row)"
-				@dragover="drop.over($event, row)"
-				@drop="drop.drop($event, row)"
+	<div class="tree-table">
+		<label class="search">
+			<KitIcon name="search" small />
+			<input v-model="search" type="search" placeholder="Search" @keydown.enter.prevent="goToMatch" />
+			<button
+				v-if="matches && matchPosition?.of"
+				type="button"
+				class="next"
+				title="Enter: the next match, opening the way to it (Shift+Enter: back)"
+				@click="goToMatch"
 			>
-				<div class="cell controls" :style="{ paddingLeft: `${row.depth * indent}px`, '--indent': `${indent}px` }">
-					<span
-						v-for="guide in guidesOf(row)"
-						:key="`${guide.level}-${guide.kind}`"
-						class="guide"
-						:class="guide.kind"
-						:style="{ left: `${guide.level * indent + 12}px` }"
+				{{ matchPosition.at ? `${matchPosition.at}/${matchPosition.of}` : 'Next' }} ↵
+			</button>
+		</label>
+		<p class="tops">
+			<template v-if="showing">
+				{{ showing.items }} {{ showing.items < graph.data.nodes.length ? 'filtered' : '' }}
+				{{ showing.items === 1 ? 'item' : 'items' }}, {{ showing.matching }} matching
+			</template>
+			<template v-else>
+				{{ graph.data.nodes.length }} {{ graph.data.nodes.length === 1 ? 'item' : 'items' }},
+				{{ graph.roots.length }} {{ graph.roots.length === 1 ? 'root' : 'roots' }}
+			</template>
+		</p>
+		<SharedTreeTable
+			ref="table"
+			v-model="selection"
+			v-model:sort="sort"
+			:headers="headers"
+			:items="items"
+			item-key="id"
+			show-select="multiple"
+			selection-use-keys
+			show-resize
+			allow-header-reorder
+			:show-manual-sort="!!editor"
+			manual-sort-key="sort"
+			:readonly="!editor"
+			:row-height="rowHeights[density]"
+			:graph="graph"
+			:repeat="repeat"
+			:collection="`playground:${graph.data.id}`"
+			:tree-column="treeColumn === 'controls' ? null : 'label'"
+			:show-guides="guides === 'shown'"
+			:open-depth="Number(openDepth) < 0 ? null : Number(openDepth)"
+			:matches="searchMode === 'hide' ? null : matches"
+			:keep="searchMode === 'hide' ? matches : null"
+			:search-mode="searchMode === 'hide' ? 'routes' : searchMode"
+			:max-open-depth="Number(maxOpenDepth) < 0 ? null : Number(maxOpenDepth)"
+			:motion="motion"
+			@update:headers="onHeaders"
+			@click:row="onRowClick"
+			@update:items="onEdits"
+			@showing="showing = $event"
+			@match-position="matchPosition = $event"
+		>
+			<template #[`item.label`]="{ item }">
+				<span class="label">
+					<NodeIcon
+						v-if="graph.node(item['--node'] ?? item.id).icon"
+						:name="graph.node(item['--node'] ?? item.id).icon!"
+						:style="{ color: graph.node(item['--node'] ?? item.id).colour }"
 					/>
-					<!-- First, so a leaf's empty slot reads as indentation rather than a gap before its name -->
-					<!-- Merged: the folder's chevron is also its handle. A drag never folds on release, as the
-					     browser sends no click after one. -->
-					<button
-						v-if="row.hasChildren && merged"
-						type="button"
-						class="icon-button toggle grab"
-						:class="{ open: row.open }"
-						:aria-label="row.open ? 'Collapse' : 'Expand'"
-						:title="`Click to ${row.open ? 'fold' : 'unfold'}, drag to move; hold Alt while dragging to add a parent instead`"
-						draggable="true"
-						@click.stop="tree.toggle(row)"
-						@dragstart="drop.start($event, row)"
-						@dragend="drop.end"
-					>
-						<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-					</button>
-					<button
-						v-else-if="row.hasChildren"
-						type="button"
-						class="icon-button toggle"
-						:class="{ open: row.open }"
-						:aria-label="row.open ? 'Collapse' : 'Expand'"
-						@click.stop="tree.toggle(row)"
-					>
-						<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-					</button>
-					<span v-else-if="!merged" class="icon-button leaf" />
-					<button
-						v-if="editor && (!merged || !row.hasChildren)"
-						type="button"
-						class="icon-button handle"
-						draggable="true"
-						title="Drag to move; hold Alt to add a parent instead"
-						@click.stop
-						@dragstart="drop.start($event, row)"
-						@dragend="drop.end"
-					>
-						<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9h14M5 15h14" /></svg>
-					</button>
-					<input
-						type="checkbox"
-						:aria-label="`Select ${graph.label(row.id)}`"
-						:checked="selected.has(row.id)"
-						@click.stop
-						@change="toggleSelected(row.id)"
-					/>
-				</div>
-
-				<div
-					v-for="column in columns"
-					:key="column.key"
-					class="cell"
-					:class="{ label: column.type === 'label', moving: moving === column.key }"
-					role="gridcell"
-				>
-					<template v-if="column.type === 'label'">
-						<NodeLabel
-							:graph="graph"
-							:id="row.id"
-							:duplicate="!row.full"
-							:loop="row.loop"
-							:mirror="row.mirror"
-						/>
-					</template>
-					<span v-else-if="column.type === 'parents'" class="text">
-						{{ graph.parents(row.id).map(graph.label).join(', ') }}
-					</span>
-					<span v-else class="text" :class="column.type">
-						{{ format(fieldOf(row, column.key), column.type) }}
-					</span>
-				</div>
-			</div>
-			</TransitionGroup>
-		</div>
+					<span>{{ item.label }}</span>
+				</span>
+			</template>
+			<template v-for="column in booleanColumns" :key="column.key" #[`item.${column.key}`]="{ item }">
+				<KitIcon v-if="item[column.key]" name="check" small />
+				<KitValueNull v-else />
+			</template>
+		</SharedTreeTable>
 	</div>
 </template>
 
 <style scoped>
-.table {
-	width: max-content;
-	min-width: 100%;
+.tree-table {
+	min-width: 0;
 }
 
-.row {
-	position: relative;
-	display: grid;
-	/* A fixed height, so folding can slide it to nothing and back */
-	height: var(--row-height);
-	border-bottom: var(--theme--border-width) solid var(--theme--border-color-subdued);
-	cursor: pointer;
-}
-
-.row:not(.header):hover {
-	background-color: var(--theme--background-subdued);
-}
-
-.row.current,
-.row.selected {
-	background-color: var(--theme--primary-background);
-}
-
-/* Holding Alt: everything the focus lives in, lit wherever it appears */
-.row.home {
-	background-color: color-mix(in srgb, var(--theme--secondary) 20%, transparent);
-}
-
-/* Drawn from where the guide curving into it ends, in the border's own space */
-.row[data-divider-inset] {
-	border-bottom-color: transparent;
-	background-image: linear-gradient(var(--theme--border-color-subdued), var(--theme--border-color-subdued));
-	background-repeat: no-repeat;
-	background-origin: border-box;
-	background-position: var(--divider-start) 100%;
-	background-size: calc(100% - var(--divider-start)) var(--theme--border-width);
-}
-
-.row.duplicate {
-	color: var(--theme--foreground-subdued);
-}
-
-.row.loop .cell.label {
-	color: var(--theme--warning);
-}
-
-.reshaping .row {
-	transition:
-		opacity 150ms ease-out,
-		grid-template-columns 160ms var(--ease-out);
-}
-
-.header {
-	position: sticky;
-	top: 0;
-	z-index: 1;
-	font-weight: 600;
-	color: var(--theme--foreground-accent);
-	background: var(--theme--background);
-	border-bottom-color: var(--theme--border-color);
-	cursor: default;
-}
-
-.header [role='columnheader'] {
-	cursor: grab;
-	touch-action: none;
-}
-
-.header [role='columnheader'].moving {
-	cursor: grabbing;
-}
-
-/* The whole column lit while its heading is dragged, so you can see what's moving */
-.cell.moving {
-	background: color-mix(in srgb, var(--theme--primary) 10%, transparent);
-}
-
-.cell {
-	position: relative;
+.search {
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	min-width: 0;
-	padding: 0 12px;
-}
-
-.cell.controls {
-	gap: 4px;
-	padding-right: 0;
-}
-
-.text {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-/* Left like every other column, as Directus aligns them, but with figures of equal width */
-.text.number {
-	font-variant-numeric: tabular-nums;
-}
-
-.heading {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-/* A wide hit area on the column's right edge, drawn as a hairline */
-.resizer {
-	position: absolute;
-	top: 20%;
-	right: -4px;
-	bottom: 20%;
-	z-index: 1;
-	width: 8px;
-	cursor: col-resize;
-}
-
-.resizer::after {
-	content: '';
-	position: absolute;
-	left: 3px;
-	top: 0;
-	bottom: 0;
-	width: 2px;
-	border-radius: 1px;
-	background: var(--theme--border-color);
-}
-
-.resizer:hover::after {
-	background: var(--theme--primary);
-}
-
-.handle-space {
-	flex-shrink: 0;
-	width: 24px;
-}
-
-input[type='checkbox'] {
-	flex-shrink: 0;
-	width: 16px;
-	height: 16px;
-	margin: 0 4px;
-	accent-color: var(--theme--primary);
-}
-
-.icon-button {
-	display: flex;
-	flex-shrink: 0;
-	width: 24px;
-	height: 24px;
-	padding: 0;
+	max-width: 320px;
+	margin-bottom: 8px;
+	padding: 4px 10px;
 	color: var(--theme--foreground-subdued);
+	background: var(--theme--form--field--input--background);
+	border: var(--theme--border-width) solid var(--theme--form--field--input--border-color);
+	border-radius: var(--theme--border-radius);
+}
+
+.search:focus-within {
+	border-color: var(--theme--primary);
+}
+
+.search input {
+	flex: 1;
+	min-width: 0;
+	padding: 2px 0;
+	font: inherit;
+	color: var(--theme--foreground);
 	background: none;
 	border: none;
+	outline: none;
+}
+
+.next {
+	flex-shrink: 0;
+	padding: 1px 6px;
+	font: inherit;
+	font-size: 12px;
+	color: var(--theme--foreground-subdued);
+	background: var(--theme--background-normal);
+	border: none;
+	border-radius: var(--theme--border-radius);
 	cursor: pointer;
 }
 
-.icon-button:hover {
+.next:hover {
 	color: var(--theme--foreground);
 }
 
-.handle,
-.toggle.grab {
-	cursor: grab;
+.tops {
+	margin: 0 0 8px;
+	font-size: 12px;
+	color: var(--theme--foreground-subdued);
 }
 
-.toggle.grab:active {
-	cursor: grabbing;
-}
-
-.icon-button svg {
-	width: 100%;
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 2;
-	stroke-linecap: round;
-}
-
-/* A leaf's first mark sits at its own level, as a chevron does, or the handle lines up with the
-   chevrons a level deeper and it looks like it's inside the folder above. Upright, like a tree's
-   guide line: a dash would read as collapse. A little over half the row, so a run of them nearly
-   meets but plainly doesn't: joined, they'd claim to be guide lines, broken wherever a sibling
-   folder has a chevron. */
-.icon-button.leaf {
+.label {
+	display: inline-flex;
 	align-items: center;
-	justify-content: center;
-	cursor: default;
-}
-
-.icon-button.leaf::after {
-	content: '';
-	width: 2px;
-	height: calc(var(--row-height) * 0.55);
-	background: var(--theme--foreground-subdued);
-	border-radius: 1px;
-	opacity: 0.5;
-}
-
-/* Full strength open or folded, and a size up from the other controls, as it shows the hierarchy */
-.toggle {
-	color: var(--theme--foreground-accent);
-}
-
-/* Down the middle of the chevron's column, past the row's bottom border so the lines don't break,
-   in the dividers' colour so a curve joins its divider as one stroke */
-.guide {
-	position: absolute;
-	width: 0;
-	border-left: var(--theme--border-width) solid var(--theme--border-color-subdued);
-	pointer-events: none;
-}
-
-.guide.through {
-	top: 0;
-	bottom: -1px;
-}
-
-/* From just under the open chevron */
-.guide.stub {
-	top: calc(50% + 14px);
-	bottom: -1px;
-}
-
-/* Round the bottom of the last row and into its divider, closing the item's contents off: a pixel
-   past the row, on the divider's own line, not stacked just above it */
-.guide.end {
-	top: 0;
-	bottom: -1px;
-	width: calc(var(--indent) - 14px);
-	border-bottom: var(--theme--border-width) solid var(--theme--border-color-subdued);
-	border-bottom-left-radius: 6px;
-}
-
-.toggle svg {
-	width: 115%;
-	transition: transform 150ms var(--ease-out);
-}
-
-.toggle.open svg {
-	transform: rotate(90deg);
-}
-
-.row.drop-inside {
-	outline: 2px solid var(--theme--primary);
-	outline-offset: -2px;
-}
-
-.rows {
-	position: relative;
-}
-
-/*
- * Folding slides rows shut and open, as the Directus layout does: the same timing, and rows keep
- * their place while they shrink, so the ones below follow them rather than jumping. Unlike the
- * Outline's rows, which leave the flow and fade.
- */
-.tree-fold-enter-active,
-.tree-fold-leave-active {
+	gap: 6px;
+	min-width: 0;
 	overflow: hidden;
-	transition:
-		height 150ms var(--ease-out),
-		opacity 150ms ease-out;
-}
-
-.tree-fold-enter-from,
-.tree-fold-leave-to {
-	height: 0;
-	opacity: 0;
-}
-
-.tree-fold-move {
-	transition: transform 160ms var(--ease-out);
-}
-
-.stepper {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	margin: 0 8px 0 12px;
-	font-size: 13px;
-	color: var(--theme--foreground-subdued);
-}
-
-.stepper button {
-	min-width: 26px;
-	padding: 4px 6px;
-	font: inherit;
-	color: inherit;
-	background: none;
-	border: var(--theme--border-width) solid var(--theme--border-color);
-	border-radius: var(--theme--border-radius);
-	cursor: pointer;
-}
-
-.stepper button:hover:not(:disabled) {
-	color: var(--theme--foreground);
-	border-color: var(--theme--border-color-accent);
-}
-
-.stepper button:disabled {
-	cursor: default;
-	opacity: 0.5;
-}
-
-.stepper .count {
-	margin-right: 2px;
-	font-variant-numeric: tabular-nums;
-}
-
-.new {
-	padding: 4px 10px;
-	font: inherit;
-	font-size: 13px;
-	color: var(--theme--foreground);
-	background: var(--theme--primary-background);
-	border: var(--theme--border-width) solid var(--theme--primary);
-	border-radius: var(--theme--border-radius);
-	cursor: pointer;
-}
-
-.selection {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-	margin-left: 8px;
-	font-size: 13px;
-	color: var(--theme--foreground-subdued);
-}
-
-.selection button {
-	padding: 2px 8px;
-	font: inherit;
-	color: inherit;
-	background: none;
-	border: var(--theme--border-width) solid var(--theme--border-color);
-	border-radius: var(--theme--border-radius);
-	cursor: pointer;
+	white-space: nowrap;
+	text-overflow: ellipsis;
 }
 </style>

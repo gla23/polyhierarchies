@@ -41,7 +41,7 @@
 		"type": "layout",
 		"path": "dist/index.js",
 		"source": "src/index.ts",
-		"host": "^10.10.0 || ^11.0.0"
+		"host": "^10.10.0 || ^11.0.0 || ^12.0.0"
 	},
 	"scripts": {
 		"build": "directus-extension build",
@@ -54,6 +54,8 @@
 		"@directus/system-data": "^2.1.2",
 		"@directus/utils": "^12.0.4",
 		"@json2csv/plainjs": "^7.0.6",
+		"@polyhierarchies/core": "workspace:*",
+		"@polyhierarchies/ui": "workspace:*",
 		"@types/file-saver": "^2.0.7",
 		"@types/lodash": "^4.17.13",
 		"@vueuse/core": "^12.0.0",

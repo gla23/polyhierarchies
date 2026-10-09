@@ -1,7 +1,7 @@
-import type { Field, Filter, Item, PrimaryKey } from '@directus/types';
-import type { ComputedRef, Ref } from 'vue';
-import type { HeaderRaw, Sort } from './core-clones/components/v-table/types';
-import type { LayoutOptions, LayoutQuery, TreeEdits } from './types';
+import type { Field, Filter, Item, PrimaryKey, Relation } from '@directus/types';
+import type { ComputedRef, Ref, WritableComputedRef } from 'vue';
+import type { HeaderRaw, Sort } from '@polyhierarchies/ui/table';
+import type { LayerMode, LayoutOptions, LayoutQuery, TreeEdits } from './types';
 import {
 	defineLayout,
 	useApi,
@@ -12,6 +12,7 @@ import {
 	useSync,
 } from '@directus/extensions-sdk';
 import { getEndpoint } from '@directus/utils';
+import { createGraph, fromJunction, fromParentField } from '@polyhierarchies/core';
 import { debounce, flatten } from 'lodash';
 import {
 	computed,
@@ -29,7 +30,7 @@ import Actions from './actions.vue';
 import { useAliasFields } from './core-clones/composables/use-alias-fields';
 import { useLayoutClickHandler } from './core-clones/composables/use-layout-click-handler';
 import { adjustFieldsForDisplays } from './core-clones/utils/adjust-fields-for-displays';
-import { formatItemsCountPaginated } from './core-clones/utils/format-items-count';
+import { formatItemsCountPaginated, formatItemsCountRelative } from './core-clones/utils/format-items-count';
 import { getDefaultDisplayForType } from './core-clones/utils/get-default-display-for-type';
 import { hideDragImage } from './core-clones/utils/hide-drag-image';
 import { saveAsCSV } from './core-clones/utils/save-as-csv';
@@ -71,6 +72,8 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		} = useCollection(collection);
 
 		const { sort, limit, page, fields } = useItemOptions();
+		// Before anything reads the options it fills in
+		const defaults = useSchemaDefaults();
 
 		const { aliasedFields, aliasQuery, aliasedKeys } = useAliasFields(
 			fields,
@@ -90,15 +93,37 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			sortField,
 		});
 
-		const shiftedColumns = syncRefProperty(layoutOptions, 'shiftedColumns', 1);
+		const hierarchy = withDefault(syncRefProperty(layoutOptions, 'hierarchy', undefined), defaults.hierarchy);
+		const junction = withDefault(syncRefProperty(layoutOptions, 'junction', undefined), defaults.junction);
+		const junctionParent = withDefault(syncRefProperty(layoutOptions, 'junctionParent', undefined), computed(() => defaults.ends(junction.value).parent));
+		const junctionChild = withDefault(syncRefProperty(layoutOptions, 'junctionChild', undefined), computed(() => defaults.ends(junction.value).child));
+		const junctionSort = withDefault(syncRefProperty(layoutOptions, 'junctionSort', undefined), computed(() => defaults.sortOf(junction.value)));
+		const treeColumn = withDefault(syncRefProperty(layoutOptions, 'treeColumn', undefined), defaults.treeColumn);
 		const showGuides = syncRefProperty(layoutOptions, 'showGuides', true);
-		const openDepth = syncRefProperty(layoutOptions, 'openDepth', null);
+		// Filters usually exclude (archived, say); searches usually look for something
+		const filterMode = syncRefProperty(layoutOptions, 'filterMode', 'hide');
+		const searchMode = syncRefProperty(layoutOptions, 'searchMode', 'routes');
+		const modeMenus = syncRefProperty(layoutOptions, 'modeMenus', true);
+		// Two levels unless a view says otherwise: the shape, without hundreds of rows. -1 is all.
+		const openDepth = syncRefProperty(layoutOptions, 'openDepth', 2);
+		// Deeper, the indent pushes every column after the tree column off screen
+		const maxOpenDepth = syncRefProperty(layoutOptions, 'maxOpenDepth', 5);
 
 		const { onClick } = useLayoutClickHandler({
 			props,
 			selection,
 			primaryKeyField,
 		});
+
+		/**
+		 * Whether the items are drawn as a tree. A tree loads whole, with no page and no search or
+		 * filter: those find matches within it instead (`useSearchMatches`), so a match keeps its place.
+		 */
+		const treeActive = computed(() =>
+			hierarchy.value === 'polyhierarchy'
+				? !!(junction.value && junctionParent.value && junctionChild.value)
+				: !!parentField.value,
+		);
 
 		const {
 			items,
@@ -112,12 +137,13 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			getTotalCount,
 		} = useItems(collection, {
 			sort,
-			limit,
-			page,
+			limit: computed(() => (treeActive.value ? -1 : limit.value)),
+			// Writable, as useItems puts the page back to 1 when the query changes
+			page: computed({ get: () => (treeActive.value ? 1 : page.value), set: (value) => (page.value = value) }),
 			fields: fieldsToQuery,
 			alias: aliasQuery,
-			filter,
-			search,
+			filter: computed(() => (treeActive.value ? null : filter.value)),
+			search: computed(() => (treeActive.value ? null : search.value)),
 			filterSystem,
 		});
 
@@ -131,11 +157,29 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			tableSpacing,
 		} = useTable();
 
+		// Here in setup, as Directus does: Vue works the count out again outside any component to see if
+		// it changed, and useI18n() throws there, so a change to the count alone never showed
+		const { t: translate, n: formatNumber } = useI18n();
+		const i18n = { t: translate, n: formatNumber };
 		const showingCount = computed(() => {
 			// Don't show count if there are no items
 			if (!totalCount.value || !itemCount.value)
 				return;
-
+			// A tree also says how many items it starts from
+			const roots = graph.value?.roots.length ?? 0;
+			const tops = graph.value ? `, ${roots} ${roots === 1 ? 'root' : 'roots'}` : '';
+			// Searching or filtering a tree: the items it shows, which the table counts, and how many match
+			if (showing.value) {
+				const { items: shown, matching } = showing.value;
+				return `${formatItemsCountPaginated({
+					currentItems: shown,
+					currentPage: 1,
+					perPage: shown,
+					isFiltered: true,
+					totalItems: totalCount.value,
+					i18n,
+				})}, ${matching} matching`;
+			}
 			return formatItemsCountPaginated({
 				currentItems: itemCount.value,
 				currentPage: page.value,
@@ -143,12 +187,33 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				perPage: limit.value > 0 ? limit.value : itemCount.value,
 				isFiltered: !!filterUser.value,
 				totalItems: totalCount.value,
-			});
+				i18n,
+			}) + tops;
 		});
 
 		const { isFiltered } = useFilteringTreeView({ filterUser, search });
+		/**
+		 * Sorted by a column rather than the hierarchy's own order: the tree stays, its siblings in the
+		 * column's order (the items arrive sorted, and the graph follows their order), and nothing can
+		 * be dragged into place until it's sorted by the hierarchy again.
+		 */
+		const columnSorted = computed(() => {
+			const by = tableSort.value?.by;
+			return !!by && by !== sortField.value && by !== primaryKeyField.value?.field;
+		});
+		const { matches, keep, highlightMode } = useSearchMatches();
+		const showing = ref<{ items: number; matching: number } | null>(null);
+		/**
+		 * Going to the next match: the table knows the matches' order and opens the way, so the top
+		 * bar's button asks it through the layout, and hears back which one it's at
+		 */
+		const matchPosition = ref<{ at: number | null; of: number } | null>(null);
+		const matchJump = ref<{ step: 1 | -1; n: number } | null>(null);
+		const goToMatch = (step: 1 | -1 = 1) => (matchJump.value = { step, n: (matchJump.value?.n ?? 0) + 1 });
 
+		const { links, linksActive, linkKey, loadLinks } = useJunction();
 		const { saveEdits, shownItems } = useSaveEdits();
+		const { graph, nodeLabel } = useHierarchyGraph();
 
 		return {
 			tableHeaders,
@@ -171,9 +236,34 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			activeFields,
 			tableSpacing,
 			parentField,
-			shiftedColumns,
+			hierarchy,
+			junction,
+			junctionParent,
+			junctionChild,
+			junctionSort,
+			graph,
+			manualOrder: computed(() => linksActive.value && !columnSorted.value),
+			matches,
+			treeActive,
+			columnSorted,
+			// Searching, the tree can still be edited: a drop lands after the row it's dropped on
+			treeReadonly: computed(() => treeActive.value && columnSorted.value),
+			searchMode,
+			filterMode,
+			modeMenus,
+			highlightMode,
+			setShowing: (counts: { items: number; matching: number } | null) => (showing.value = counts),
+			keep,
+			matchPosition,
+			setMatchPosition: (position: { at: number | null; of: number }) => (matchPosition.value = position),
+			matchJump,
+			goToMatch,
+			setLayoutOptions,
+			nodeLabel,
+			treeColumn,
 			showGuides,
 			openDepth,
+			maxOpenDepth,
 			primaryKeyField,
 			info,
 			showingCount,
@@ -193,12 +283,99 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			isFiltered,
 		};
 
+		/** An option as stored, or while it's unset, a default worked out from the schema; set, it's stored */
+		function withDefault<T>(stored: WritableComputedRef<T | null | undefined>, fallback: Ref<T>) {
+			return computed<T>({
+				get: () => stored.value ?? fallback.value,
+				set: (value) => (stored.value = value),
+			});
+		}
+
+		/**
+		 * Sensible defaults, so a collection shows as a tree without being set up. A parent field: the
+		 * collection's one self-referencing many-to-one, if it has just one. Failing that, a
+		 * polyhierarchy over a junction: a collection with two many-to-ones to this one, the parent
+		 * guessed by name and the sort from the relation (or a field called sort). The tree column: the
+		 * field the display template starts with, or the first plain text field shown, never a colour
+		 * or an icon, which are too narrow to indent.
+		 */
+		function useSchemaDefaults() {
+			const relationsStore = system.stores.useRelationsStore?.();
+			const relations = computed<Relation[]>(() => relationsStore?.relations ?? []);
+			const fieldsOf = (name: string | null | undefined): Field[] =>
+				name ? (fieldsStore.getFieldsForCollection?.(name) ?? []) : [];
+
+			const selfReferencing = computed(() =>
+				fieldsInCollection.value.filter(
+					(field) => ['string', 'uuid', 'integer', 'bigInteger'].includes(field.type) && field.schema?.foreign_key_table === collection.value,
+				),
+			);
+			const junctions = computed(() => {
+				const fieldsByJunction = new Map<string, string[]>();
+				for (const relation of relations.value) {
+					if (relation.related_collection !== collection.value || relation.collection === collection.value)
+						continue;
+					fieldsByJunction.set(relation.collection, [...(fieldsByJunction.get(relation.collection) ?? []), relation.field]);
+				}
+				return [...fieldsByJunction].filter(([, fields]) => fields.length >= 2);
+			});
+
+			const parent = computed(() => (selfReferencing.value.length === 1 ? selfReferencing.value[0]!.field : null));
+			const hierarchy = computed<'taxonomy' | 'polyhierarchy'>(() =>
+				layoutOptions.value?.parent || parent.value || !junctions.value.length ? 'taxonomy' : 'polyhierarchy',
+			);
+			const junction = computed(() => junctions.value[0]?.[0] ?? null);
+
+			function ends(name: string | null) {
+				const fields = junctions.value.find(([candidate]) => candidate === name)?.[1] ?? [];
+				const parentEnd = fields.find((field) => /parent|broader|source|from/i.test(field)) ?? fields[0] ?? null;
+				return { parent: parentEnd, child: fields.find((field) => field !== parentEnd) ?? null };
+			}
+
+			function sortOf(name: string | null) {
+				if (!name)
+					return null;
+				const fromRelation = relations.value.find((relation) => relation.collection === name && relation.meta?.sort_field)?.meta?.sort_field;
+				return fromRelation
+					?? fieldsOf(name).find((field) => ['integer', 'bigInteger'].includes(field.type) && /^(sort|order|position)$/i.test(field.field))?.field
+					?? null;
+			}
+
+			const treeColumn = computed(() => {
+				const shown = fields.value;
+				const textual = (key: string) => {
+					const field: Field | null = fieldsStore.getField(collection.value!, key);
+					return !!field
+						&& ['string', 'text'].includes(field.type)
+						&& !['select-color', 'select-icon', 'tab-icon-picker'].includes(field.meta?.interface ?? '')
+						&& !field.meta?.special?.includes('uuid');
+				};
+				// The template's first text field: `{{icon}} {{colour}} {{name}}` means name
+				const named = [...(info.value?.meta?.display_template ?? '').matchAll(/\{\{\s*(\w+)/g)]
+					.map((match) => match[1]!)
+					.find((key) => shown.includes(key) && textual(key));
+				return named ?? shown.find(textual) ?? shown[0] ?? '$controls';
+			});
+
+			return { parent, hierarchy, junction, ends, sortOf, treeColumn };
+		}
+
+		/**
+		 * Several options in one write. Set one at a time, each starts from the options as they were
+		 * before the last landed, so only the last survives: a swap would leave both ends the same.
+		 */
+		function setLayoutOptions(changes: Partial<LayoutOptions>) {
+			layoutOptions.value = { ...layoutOptions.value, ...changes };
+		}
+
 		async function resetPresetAndRefresh() {
 			await props?.resetPreset?.();
 			refresh();
 		}
 
 		function refresh() {
+			// The links come with the items, so a reload of one is a reload of both
+			loadLinks();
 			getItems();
 			getTotalCount();
 			getItemCount();
@@ -392,10 +569,11 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				},
 			});
 
+			// Compact unless a view says otherwise: a tree is read by its shape, and more of it fits
 			const tableSpacing = syncRefProperty(
 				layoutOptions,
 				'spacing',
-				'cozy',
+				'compact',
 			);
 
 			const tableRowHeight = computed<number>(() => {
@@ -471,7 +649,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			primaryKeyField: ComputedRef<Field | null>;
 			sortField: ComputedRef<string | null>;
 		}) {
-			const parentField = syncRefProperty(layoutOptions, 'parent', null);
+			const parentField = withDefault(syncRefProperty(layoutOptions, 'parent', null), defaults.parent);
 
 			const fieldsToQuery = computed(() => {
 				// A copy, or the pushes below would grow the relational fields list itself
@@ -479,7 +657,18 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				addSortField();
 				addParentField();
 
+				addTemplateFields();
+
 				return fieldsToQuery;
+
+				/** What the display template needs, so hints can name a node ("in Fruit") */
+				function addTemplateFields() {
+					const template = info.value?.meta?.display_template;
+					for (const [, field] of template?.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g) ?? []) {
+						if (field && !fieldsToQuery.includes(field))
+							fieldsToQuery.push(field);
+					}
+				}
 
 				function addSortField() {
 					if (
@@ -494,7 +683,8 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 
 				function addParentField() {
 					if (
-						parentField.value
+						hierarchy.value !== 'polyhierarchy'
+						&& parentField.value
 						&& primaryKeyField.value
 						&& !fieldsToQuery.some(
 							(field) =>
@@ -525,6 +715,86 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			}
 		}
 
+		/**
+		 * A polyhierarchy's links: every row of the junction, with only the fields the graph needs,
+		 * loaded with the items and again after each save. Without read access to the junction there
+		 * are no links, so the items show flat rather than wrongly nested.
+		 */
+		function useJunction() {
+			const api = useApi();
+			const links = ref<Item[]>([]);
+			const linkKey = computed<string>(
+				() => fieldsStore.getPrimaryKeyFieldForCollection?.(junction.value)?.field ?? 'id',
+			);
+			const linksActive = computed(
+				() => hierarchy.value === 'polyhierarchy' && !!junction.value && !!junctionParent.value && !!junctionChild.value,
+			);
+
+			async function loadLinks() {
+				if (!linksActive.value) {
+					links.value = [];
+					return;
+				}
+				try {
+					const fields = [linkKey.value, junctionParent.value, junctionChild.value, junctionSort.value].filter(Boolean);
+					const response = await api.get(getEndpoint(junction.value!), { params: { fields, limit: -1 } });
+					links.value = response.data.data;
+				}
+				catch {
+					links.value = [];
+				}
+			}
+
+			watch([linksActive, junction, junctionParent, junctionChild, junctionSort], loadLinks, { immediate: true });
+
+			return { links, linksActive, linkKey, loadLinks };
+		}
+
+		/**
+		 * The hierarchy as a graph for the table to draw by placement: each item naming its one parent
+		 * (a taxonomy), or the junction's links giving it any number (a polyhierarchy).
+		 */
+		function useHierarchyGraph() {
+			const graph = computed(() => {
+				const key = primaryKeyField.value?.field;
+				if (!key)
+					return null;
+				const id = `directus:${collection.value}`;
+				if (linksActive.value) {
+					// Sorted by a column, a parent's children come in the items' order, not the links'
+					const position = new Map(shownItems.value.map((item, index) => [String(item[key]), index]));
+					const ordered = columnSorted.value
+						? [...links.value].sort((a, b) => (position.get(String(a[junctionChild.value!])) ?? 0) - (position.get(String(b[junctionChild.value!])) ?? 0))
+						: links.value;
+					return createGraph(fromJunction(shownItems.value, ordered, {
+						id,
+						key,
+						parent: junctionParent.value!,
+						child: junctionChild.value!,
+						sort: columnSorted.value ? null : junctionSort.value,
+					}));
+				}
+				if (hierarchy.value !== 'polyhierarchy' && parentField.value)
+					return createGraph(fromParentField(shownItems.value, { id, key, parent: parentField.value }));
+				return null;
+			});
+
+			/** An item as the collection's display template names it, for hints like "in Fruit" */
+			const itemsById = computed(() => new Map(shownItems.value.map((item) => [String(item[primaryKeyField.value?.field ?? 'id']), item])));
+			function nodeLabel(id: string) {
+				const item = itemsById.value.get(id);
+				if (!item)
+					return id;
+				const template = info.value?.meta?.display_template;
+				const named = template
+					? template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_: string, path: string) => String(path.split('.').reduce((value: any, part: string) => value?.[part], item) ?? '')).trim()
+					: '';
+				return named || id;
+			}
+
+			return { graph, nodeLabel };
+		}
+
 		function useFilteringTreeView({
 			filterUser,
 			search,
@@ -536,6 +806,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				() => !!filterUser.value || !!search.value,
 			);
 
+			// Flat, a filtered list can't keep its manual order; a tree keeps its shape and shows the matches
 			watch(() => isFiltered.value, turnOffManualSortOnFilter);
 
 			return {
@@ -543,9 +814,77 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			};
 
 			function turnOffManualSortOnFilter(filterIsActive: boolean) {
-				if (filterIsActive)
+				if (filterIsActive && !treeActive.value)
 					onSortChange(null);
 			}
+		}
+
+		/**
+		 * Searching or filtering a tree: Directus finds the matching items, with the same search and
+		 * filter it would have applied to the list, so a search means what it always does. The tree
+		 * stays loaded whole and the table shows the routes to them.
+		 */
+		/**
+		 * Searching or filtering a tree: Directus finds the matching items, with the same search and
+		 * filter it would have applied to the list, asked separately so each can have its own mode.
+		 * Hide layers keep only what matches (`keep`); highlight layers combine, as Directus's search
+		 * and filter do, both must match (`matches`); the search's mode decides how highlights show.
+		 */
+		function useSearchMatches() {
+			const api = useApi();
+			const filterSet = ref<Set<string> | null>(null);
+			const searchSet = ref<Set<string> | null>(null);
+			let asked = 0;
+			async function idsWith(params: Record<string, unknown>, pk: string) {
+				const response = await api.get(getEndpoint(collection.value!), { params: { fields: [pk], limit: -1, ...params } });
+				return new Set<string>(response.data.data.map((item: Item) => String(item[pk])));
+			}
+			async function find() {
+				const pk = primaryKeyField.value?.field;
+				const ask = ++asked;
+				if (!treeActive.value || !pk) {
+					filterSet.value = searchSet.value = null;
+					return;
+				}
+				try {
+					const [filtered, searched] = await Promise.all([
+						filterUser.value && filterMode.value !== 'off' ? idsWith({ filter: filter.value }, pk) : null,
+						search.value && searchMode.value !== 'off' ? idsWith({ search: search.value }, pk) : null,
+					]);
+					// A newer search may have finished first
+					if (ask === asked) {
+						filterSet.value = filtered;
+						searchSet.value = searched;
+					}
+				}
+				catch {
+					if (ask === asked)
+						filterSet.value = searchSet.value = null;
+				}
+			}
+			// A mode turned off and on again fetches afresh, as nothing was kept while it was off
+			watch([treeActive, filter, filterUser, search, () => filterMode.value === 'off', () => searchMode.value === 'off'], find, { immediate: true, deep: true });
+
+			const both = (sets: (Set<string> | null)[]) => {
+				const present = sets.filter((set): set is Set<string> => !!set);
+				return present.length ? new Set([...present[0]!].filter((id) => present.every((set) => set.has(id)))) : null;
+			};
+			const keep = computed(() => both([
+				filterMode.value === 'hide' ? filterSet.value : null,
+				searchMode.value === 'hide' ? searchSet.value : null,
+			]));
+			const highlights = (mode: LayerMode) => mode === 'routes' || mode === 'inplace';
+			const matches = computed(() => both([
+				highlights(filterMode.value) ? filterSet.value : null,
+				highlights(searchMode.value) ? searchSet.value : null,
+			]));
+			// The search's way of highlighting if it highlights, else the filter's
+			const highlightMode = computed<'routes' | 'inplace'>(() =>
+				searchSet.value && highlights(searchMode.value)
+					? (searchMode.value as 'routes' | 'inplace')
+					: filterMode.value === 'inplace' ? 'inplace' : 'routes',
+			);
+			return { matches, keep, highlightMode };
 		}
 
 		function useSaveEdits() {
@@ -558,10 +897,12 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			let changed = false;
 			// The table keeps its own order while any are pending: a reload landing between two drags
 			// would put the second back where it was, until its own save reloaded it a moment later
-			const shownItems = ref(items.value);
+			// Never undefined: Directus leaves its items so when a response comes back without data (seen in
+			// Firefox), and everything built on them would throw
+			const shownItems = ref<Item[]>(items.value ?? []);
 			watch(items, (loaded) => {
 				if (!pending)
-					shownItems.value = loaded;
+					shownItems.value = loaded ?? [];
 			});
 
 			return { saveEdits, shownItems };
@@ -575,7 +916,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 						return;
 					if (changed)
 						refresh();
-					else shownItems.value = items.value;
+					else shownItems.value = items.value ?? [];
 					changed = false;
 				});
 			}
@@ -585,8 +926,13 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			 * through `/utils/sort`, as Directus's own table does: it only shifts the sort values between
 			 * where an item was and where it went, and leaves `date_updated`, revisions and flows alone.
 			 */
-			async function save({ order, parent }: TreeEdits) {
+			async function save({ order, parent, moved }: TreeEdits) {
 				try {
+					if (linksActive.value) {
+						if (moved && await saveLinks(moved))
+							changed = true;
+						return;
+					}
 					if (parent && parentField.value) {
 						await api.patch(`${getEndpoint(collection.value!)}/${parent.id}`, {
 							[parentField.value]: parent.parent,
@@ -622,6 +968,85 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				for (const move of moves)
 					await api.post(`/utils/sort/${collection.value}`, move);
 				return moves.length > 0;
+			}
+
+			/**
+			 * A drop in a polyhierarchy, as changes to the junction's links: a move points the dragged
+			 * placement's link at its new parent; Alt adds a link and keeps the old one; a drop at the
+			 * top level removes the link, but only when it's the node's last parent, as otherwise it
+			 * has a home already. Then the new parent's links are renumbered in the order shown.
+			 */
+			async function saveLinks(moved: NonNullable<TreeEdits['moved']>) {
+				const endpoint = getEndpoint(junction.value!);
+				const pk = primaryKeyField.value!.field;
+				const parentKey = junctionParent.value!;
+				const childKey = junctionChild.value!;
+				const keyOf = (node: string) => shownItems.value.find((item) => String(item[pk]) === node)?.[pk] ?? node;
+				const linkOf = (from: string, node: string) =>
+					links.value.find((link) => String(link[parentKey]) === from && String(link[childKey]) === node);
+				const old = moved.from ? linkOf(moved.from, moved.node) : undefined;
+
+				// No sort field on the links: a drop that only reordered can't be kept, so say why
+				if (!moved.link && moved.from === moved.to && !junctionSort.value) {
+					const { useNotificationsStore } = system.stores;
+					useNotificationsStore().add({
+						title: `Not reordered: ${junction.value} has no sort field to keep an order in`,
+						text: 'Rows can still be moved to another parent. Add an integer sort field to the links, then choose it under Order of children.',
+						type: 'info',
+					});
+					return true;
+				}
+				if (moved.link) {
+					if (!moved.to || linkOf(moved.to, moved.node))
+						return false;
+					await api.post(endpoint, { [parentKey]: keyOf(moved.to), [childKey]: keyOf(moved.node) });
+				}
+				else if (moved.from !== moved.to) {
+					if (moved.to) {
+						// Already a child there too: the move just drops the old link
+						if (linkOf(moved.to, moved.node)) {
+							if (old)
+								await api.delete(`${endpoint}/${old[linkKey.value]}`);
+						}
+						else if (old) {
+							await api.patch(`${endpoint}/${old[linkKey.value]}`, { [parentKey]: keyOf(moved.to) });
+						}
+						else {
+							await api.post(endpoint, { [parentKey]: keyOf(moved.to), [childKey]: keyOf(moved.node) });
+						}
+					}
+					else if (old) {
+						const homes = links.value.filter((link) => String(link[childKey]) === moved.node).length;
+						if (homes > 1)
+							return true; // Put back by the reload: it has another parent already
+						await api.delete(`${endpoint}/${old[linkKey.value]}`);
+					}
+				}
+
+				if (moved.to && junctionSort.value)
+					await renumber(endpoint, keyOf(moved.to), moved.node, moved.index);
+				return true;
+			}
+
+			/** The parent's links in their order, with the moved one at its new place, numbered 1, 2, 3 */
+			async function renumber(endpoint: string, parent: PrimaryKey, node: string, index: number) {
+				const sort = junctionSort.value!;
+				const response = await api.get(endpoint, {
+					params: { fields: [linkKey.value, junctionChild.value, sort], filter: { [junctionParent.value!]: { _eq: parent } }, limit: -1 },
+				});
+				const siblings: Item[] = response.data.data;
+				siblings.sort((a, b) => (a[sort] ?? Infinity) - (b[sort] ?? Infinity));
+				const position = siblings.findIndex((link) => String(link[junctionChild.value!]) === node);
+				if (position >= 0) {
+					const [link] = siblings.splice(position, 1);
+					siblings.splice(Math.min(index, siblings.length), 0, link!);
+				}
+				const changes = siblings
+					.map((link, at) => ({ [linkKey.value]: link[linkKey.value], [sort]: at + 1, was: link[sort] }))
+					.filter((change) => change.was !== change[sort])
+					.map(({ was: _was, ...change }) => change);
+				if (changes.length)
+					await api.patch(endpoint, changes);
 			}
 
 			/** Fresh from the server rather than the loaded items, which the table has already reordered */

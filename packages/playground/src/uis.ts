@@ -4,11 +4,12 @@ import {
 	LayeredDag,
 	MillerColumns,
 	NetworkGraph,
-	OutlineTree,
 	Plex,
+	TreeLab,
 	TreeTable
 } from '@polyhierarchies/ui';
 import type { Component } from 'vue';
+import type { ConceptId } from './pages/concepts';
 
 export interface OptionDef {
 	key: string;
@@ -29,6 +30,8 @@ export interface UiEntry {
 	about: string[];
 	/** How it's edited, when editing is on */
 	editing: string;
+	/** The concept pages it's an example in */
+	concepts?: ConceptId[];
 	options: OptionDef[];
 }
 
@@ -74,62 +77,44 @@ const motion: OptionDef = {
 
 export const uis: UiEntry[] = [
 	{
-		id: 'outline',
-		name: 'Outline',
-		component: OutlineTree,
-		about: [
-			'The simplest tree: one line per placement, nothing but the hierarchy. It renders every placement, but checks whether it has already drawn a node: the first time it\'s drawn in full, and every time after as a dashed, terminal duplicate that jumps to the full one.',
-			'That same rule is what stops a cycle recursing forever: the second time round, a node is a duplicate — and when the duplicate is one of its own ancestors, it gets a ↻ in the warning colour, as that is where a loop closes. The number beside a node counts its parents; hover it and every placement lights up. Hold Alt and everything the focus lives in lights up instead — Zotero\'s trick.'
-		],
-		editing:
-			'Drag a row by its handle: onto the top or bottom of another to move beside it, onto its middle to move inside. Hold Alt to add a parent instead of moving. Hover a row for + (add a child), ✎ (edit) and × (remove it from this parent — a node under several keeps the others). Double-click to edit.',
-		options: [
-			density,
-			motion,
-			repeat,
-			{
-				key: 'indent',
-				label: 'Indent (px)',
-				type: 'number',
-				default: 24,
-				min: 8,
-				max: 64,
-				about: 'How far each level steps in.'
-			}
-		]
-	},
-	{
 		id: 'tree-table',
+		concepts: ['placements', 'cycles', 'searching', 'selection', 'too-big'],
 		name: 'Tree table',
 		component: TreeTable,
 		about: [
-			"The Directus tree-view layout's shape: a table whose rows nest, with columns you can resize and drag into another order, selection and drag handles. Same placement rule as the Outline, so duplicates and loops read the same.",
-			'The first columns can follow the hierarchy: they move right with each level, and the last of them gives up the same width, so every column after it stays in one straight line. That is what makes a deep tree with a title column readable without everything else zig-zagging. Hold Alt to light up every parent of the focus.'
+			"The Directus tree view layout itself: the same component the extension draws in the admin, given this dataset instead of a collection. Only a checkbox, an icon, a menu and a tooltip are stand-ins here; the rest is the extension's own markup and styles, so what you see is what Directus shows.",
+			'It draws placements rather than items: a node with two parents is two rows, in full where it is first reached and a dimmed duplicate everywhere else, which is what lets one table show a taxonomy (one parent each) and a polyhierarchy alike. One column is the tree column, usually the name: it and every column before it move right with each level while it gives up the same width, so every column after it stays in one straight line. It\'s chosen by column rather than counted, so it stays with the name however the columns are dragged about, and the hints go in it.',
+			"Folding works as in the layout: ⌘/Ctrl-click a chevron for everything inside, ⌥/Alt-click for it and its siblings, and the folds you make are remembered in this browser. Searching keeps the tree, three ways (see While searching), the count says how many items it shows and how many of those match, Enter goes to the next match (opening the way to it), and rows can still be dragged. Hovering a row lights its other placements, and the hints act when clicked: \"12 below\" opens the branch, \"in Fruit\" goes to the full placement, \"above\" to the loop's ancestor; each says what it means on hover. What Directus can't do — parent counts, hover echoes, buttons on each row — is in the Tree lab."
 		],
 		editing:
-			'Click a row to open it, as Directus opens the item page. Drag handles move a row (top or bottom edge: beside, middle: inside; Alt adds a parent instead). + New adds a node under the focus.',
+			'Drag a row by its chevron or handle: up and down to reorder, right to put it inside the row above, left to take it out. Hold Alt as you drop to add a parent instead of moving it, as the Directus layout does in its polyhierarchy mode. Click a row to open it, as Directus opens the item page.',
 		options: [
-			density,
-			motion,
+			{ ...density, default: 'compact', about: "Directus's three row sizes; compact by default, as in the layout, so more of a tree fits." },
 			repeat,
 			{
-				key: 'shiftedColumns',
-				label: 'Columns that follow the hierarchy',
-				type: 'number',
-				default: 1,
-				min: 0,
-				max: 4,
+				key: 'treeColumn',
+				label: 'Tree column',
+				type: 'choice',
+				default: 'label',
+				choices: [
+					{ value: 'label', label: 'Name' },
+					{ value: 'controls', label: 'None: only the controls' }
+				],
 				about:
-					"How many columns, from the first, move with each level. The last of them shortens by the indent, so the columns after it stay aligned. 0 is Directus's own behaviour: only the controls indent."
+					"The column the hierarchy indents: it and every column before it move right with each level, and it gives up the same width so every column after it stays in one straight line. Chosen by column, not counted, so it stays with the name however the columns are reordered; hints like \"in Fruit\" and \"12 below\" go in it too, as it's the one with room. None is Directus's own behaviour: only the controls indent."
 			},
 			{
-				key: 'indent',
-				label: 'Indent (px)',
-				type: 'number',
-				default: 28,
-				min: 8,
-				max: 64,
-				about: 'How far each level steps in. 28 is what Directus uses.'
+				key: 'searchMode',
+				label: 'While searching',
+				type: 'choice',
+				default: 'routes',
+				choices: [
+					{ value: 'hide', label: 'Hide what doesn\'t match' },
+					{ value: 'routes', label: 'Show the routes to the matches' },
+					{ value: 'inplace', label: 'Keep my folds' }
+				],
+				about:
+					'Hide: what doesn\'t match simply isn\'t there, nothing is highlighted and your folds stay; an ancestor stays, dimmed, only to hold a match\'s place. Routes: every way from a match up to the top is opened and the rest hidden, so you see where each match lives; folding then lasts only as long as the search. Keep my folds: nothing opens or hides, the matches are marked, and a folded row says how many it holds; click that to open the way to them. In Directus, filters and searches each have their own mode, so a filter can hide archived items while a search highlights on top. Whichever mode, you can keep editing.'
 			},
 			{
 				key: 'guides',
@@ -144,21 +129,95 @@ export const uis: UiEntry[] = [
 					"A faint line from under an open item's chevron down everything inside it, wrapping round the last row, so it's clear where each item's contents end. Folds with the rows."
 			},
 			{
-				key: 'handle',
-				label: 'Chevron and drag handle',
+				key: 'openDepth',
+				label: 'Levels open to start',
 				type: 'choice',
-				default: 'merged',
+				default: '2',
 				choices: [
-					{ value: 'separate', label: 'Separate' },
-					{ value: 'merged', label: 'Merged' }
+					{ value: '-1', label: 'All' },
+					{ value: '0', label: 'Top level only' },
+					{ value: '1', label: '1' },
+					{ value: '2', label: '2' },
+					{ value: '3', label: '3' },
+					{ value: '4', label: '4' }
 				],
 				about:
-					"Separate is Directus's: a chevron to fold, then a handle to drag. Merged makes them one control, as a folder in VS Code or Finder opens on a click and moves on a drag: a folder's chevron folds when clicked and moves when dragged, and a leaf, with nothing to fold, shows the handle. One icon fewer on every row, and each row's first mark sits at its own level. While editing only: read only, there's nothing to drag."
+					"How many levels start open, the layout's own option. Two by default: enough to see the shape without unfolding hundreds of rows. Folds you make yourself are kept on top of it."
+			},
+			{
+				key: 'maxOpenDepth',
+				label: 'Levels opened at most',
+				type: 'choice',
+				default: '5',
+				choices: [
+					{ value: '2', label: '2' },
+					{ value: '3', label: '3' },
+					{ value: '5', label: '5' },
+					{ value: '8', label: '8' },
+					{ value: '-1', label: 'No limit' }
+				],
+				about:
+					"How deep Unfold all (the header's chevron) and a search's routes go, so a deep tree doesn't indent every column after the name off screen; a row at the limit says how many matches are below it. Opening one row, or going to one match with Enter, goes as deep as it needs, and ⌘/Ctrl-clicking a chevron opens everything inside."
+			},
+			{
+				...motion,
+				about:
+					"Folding slides rows shut and open. Auto counts the rows drawn: in a big tree only the open ones are, so a huge tree with a few rows open still animates, and one with hundreds open just swaps. On forces it, to see the cost; off stops it."
+			}
+		]
+	},
+	{
+		id: 'tree-lab',
+		concepts: ['placements', 'looking-up', 'cycles', 'selection'],
+		name: 'Tree lab',
+		component: TreeLab,
+		about: [
+			"The Tree table without Directus's limits: what the tree view could be if it didn't have to fit Directus's columns and item pages. The same placement rule — a node in full the first time, then a dashed duplicate that says where the full one is (\"in Fruit\"), as ICD-11 greys an entry whose home is elsewhere, and a ↻ in the warning colour where a cycle closes.",
+			"Free to add what Directus can't: the number beside a node counts its parents, and hovering it lights up every placement; hold Alt and everything the focus lives in lights up instead — Zotero's trick. A folded branch says how many distinct nodes are below it, as OLS does, so you know whether it's worth opening.",
+			'Start from the focus zooms in on one node, as Workflowy does. With Direction set to Parents below, that is Wikipedia\'s parents mode: everything the node belongs to, as a tree.'
+		],
+		editing:
+			'Drag a row by its handle: onto the top or bottom of another to move beside it, onto its middle to move inside. Hold Alt to add a parent instead of moving. Hover a row for + (add a child), ✎ (edit) and × (remove it from this parent — a node under several keeps the others). Double-click to edit.',
+		options: [
+			density,
+			motion,
+			repeat,
+			{
+				key: 'start',
+				label: 'Start from',
+				type: 'choice',
+				default: 'roots',
+				choices: [
+					{ value: 'roots', label: 'The roots' },
+					{ value: 'focus', label: 'The focus' }
+				],
+				about:
+					'The roots, or zoomed in on one node: the focus at the moment you choose this, kept while you click around inside it (a button moves it to the new focus). With Direction set to Parents below, starting from a node shows everything it belongs to.'
+			},
+			{
+				key: 'openDepth',
+				label: 'Start open to',
+				type: 'number',
+				default: 0,
+				min: 0,
+				max: 8,
+				about:
+					"How many levels are open when a dataset loads, as the Directus layout's open depth does. 0 starts folded with just the way to the focus open."
+			},
+			{
+				key: 'indent',
+				label: 'Indent (px)',
+				type: 'number',
+				default: 24,
+				min: 8,
+				max: 64,
+				about: 'How far each level steps in.'
 			}
 		]
 	},
 	{
 		id: 'miller',
+		concepts: ['siblings', 'cycles'],
 		name: 'Miller columns',
 		component: MillerColumns,
 		about: [
@@ -171,11 +230,13 @@ export const uis: UiEntry[] = [
 	},
 	{
 		id: 'plex',
+		concepts: ['siblings', 'looking-up'],
 		name: 'Plex',
 		component: Plex,
 		about: [
 			"TheBrain's layout, which it calls the plex. Parents above, children below, jumps (non-hierarchical links) to the left, and siblings to the right, grouped by the parent they share. Siblings aren't stored anywhere: they're the other children of your parents, which is why hovering one lights up the line from a parent rather than from the focus.",
-			'All parents are equal and nothing is ever a duplicate, because only one step out is shown. Levels further out are added while they fit — grandparents appear when there are few enough of them, which TheBrain only offers as a manual "expanded" mode.'
+			'All parents are equal and nothing is ever a duplicate, because only one step out is shown. Levels further out are added while they fit — grandparents appear when there are few enough of them, which TheBrain only offers as a manual "expanded" mode.',
+			'Hover a parent and the siblings you share through it light up, with the label of their group; hover a sibling and the parent it came through lights up. That\'s TheBrain\'s way of showing why siblings come in groups: each group is one parent\'s other children.'
 		],
 		editing:
 			'Under the focus: + Parent, + Child and + Jump each make a new node already linked that way and open it to be named. Edit (or double-click the focus) opens it; relationships are added and removed there.',
@@ -196,6 +257,7 @@ export const uis: UiEntry[] = [
 	},
 	{
 		id: 'layered',
+		concepts: ['looking-up', 'cycles'],
 		name: 'Layered DAG',
 		component: LayeredDag,
 		about: [
@@ -229,11 +291,12 @@ export const uis: UiEntry[] = [
 	},
 	{
 		id: 'force',
+		concepts: ['cycles'],
 		name: 'Force graph',
 		component: ForceGraph,
 		about: [
 			"Ported from the force-directed Directus layout. Every node once, every edge drawn, so several parents and cycles are simply more lines. Each parent's links share a colour, so a node's parents read apart.",
-			'Nodes are pulled into layers by depth, their shortest distance from a root, so parents mostly sit above their children. Arrows point from parent to child, and the edge that closes each cycle is drawn in the warning colour; jumps are dashed and have no direction. The whole graph at once is its strength and, past a few hundred nodes, its weakness — click a node to fade everything but its neighbours.'
+			'Nodes are pulled into layers by depth, their shortest distance from a root, so parents mostly sit above their children. Arrows point from parent to child, and the edge that closes each cycle is drawn in the warning colour; jumps are dashed and have no direction. The whole graph at once is its strength and, past a few hundred nodes, its weakness — click or hover a node to fade everything but its neighbours. Zoomed out, the names fade away so the shape reads, as in Obsidian\'s graph; the focus and its neighbours stay named.'
 		],
 		editing:
 			'Double-click empty space to add a node there; double-click a node to edit it. Shift-drag from one node to another to make the first a parent of the second. Click a line to remove it.',
@@ -251,6 +314,7 @@ export const uis: UiEntry[] = [
 	},
 	{
 		id: 'network',
+		concepts: ['siblings'],
 		name: 'Network graph',
 		component: NetworkGraph,
 		about: [
@@ -294,6 +358,7 @@ export const uis: UiEntry[] = [
 	},
 	{
 		id: 'faceted',
+		concepts: ['siblings'],
 		name: 'Faceted',
 		component: FacetedView,
 		about: [

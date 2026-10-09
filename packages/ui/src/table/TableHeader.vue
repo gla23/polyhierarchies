@@ -1,17 +1,14 @@
 <script setup lang="ts">
-import type { ShowSelect } from '@directus/extensions';
-// import { Header, Sort } from './types';
-import type { Header, Sort } from '../core-clones/components/v-table/types';
-import { useSync } from '@directus/composables';
-import { clone, throttle } from 'lodash';
+import type { ShowSelect } from './types';
+import type { Header, Sort } from './types';
+import { useSync } from './useSync';
+import { clone, throttle } from './utils';
+import { useTableKit } from './kit';
 import { computed, ref, useSlots } from 'vue';
-import { useI18n } from 'vue-i18n';
 import Draggable from 'vuedraggable';
-// import { useEventListener } from '@/composables/use-event-listener';
-import { useEventListener } from '../core-clones/composables/use-event-listener';
+import { useEventListener } from './useEventListener';
 // CORE CHANGES
-// import { hideDragImage } from '@/utils/hide-drag-image';
-import { hideDragImage } from '../core-clones/utils/hide-drag-image';
+import { hideDragImage } from './hideDragImage';
 
 const props = withDefaults(
 	defineProps<{
@@ -33,6 +30,8 @@ const props = withDefaults(
 		drawnWidths?: Record<string, number>;
 		/** Every item with children folded: the chevron over the rows' ones unfolds them all */
 		allFolded?: boolean;
+		/** What unfolding them all does, a second line for a modifier's way */
+		unfoldAllLabel?: string;
 		/** More than one item has children: with one, its own chevron does the same */
 		canFoldAll?: boolean;
 		/** A parent field is set, so turning manual sorting on would show the hierarchy */
@@ -40,6 +39,7 @@ const props = withDefaults(
 	}>(),
 	{
 		showSelect: 'none',
+		unfoldAllLabel: 'Unfold all',
 		showResize: false,
 		showManualSort: false,
 		someItemsSelected: false,
@@ -60,7 +60,7 @@ const emit = defineEmits([
 	'toggle-fold-all',
 ]);
 
-const { t } = useI18n();
+const { VCheckbox, VIcon, VMenu, vTooltip, t } = useTableKit();
 
 const resizing = ref<boolean>(false);
 const resizeStartX = ref<number>(0);
@@ -238,12 +238,12 @@ function toggleManualSort() {
 					>
 						<button
 							v-if="canFoldAll"
-							v-tooltip="allFolded ? 'Unfold all' : 'Fold all'"
+							v-tooltip="allFolded ? unfoldAllLabel : 'Fold all'"
 							type="button"
 							class="fold-all"
 							:class="{ 'all-folded': allFolded }"
-							:aria-label="allFolded ? 'Unfold all' : 'Fold all'"
-							@click="$emit('toggle-fold-all')"
+							:aria-label="allFolded ? unfoldAllLabel.split('\n')[0] : 'Fold all'"
+							@click="$emit('toggle-fold-all', $event)"
 						>
 							<v-icon name="expand_more" />
 						</button>

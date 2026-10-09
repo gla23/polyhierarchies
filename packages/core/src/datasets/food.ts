@@ -6,7 +6,7 @@ export const food = fromOutline(
 		start: 'tomato',
 		name: 'Food',
 		description:
-			'The classic polyhierarchy: botany and the kitchen disagree, so a tomato is a fruit, a vegetable and a salad ingredient at once, and a peanut is both a nut and a legume.',
+			'The classic polyhierarchy: botany and the kitchen disagree, so a tomato is a fruit, a vegetable and a salad ingredient at once, and a peanut is both a nut and a legume. Try Direction: Parents below with the Tree lab starting from Tomato, for everything a tomato belongs to.',
 		columns: [
 			{ key: 'calories', label: 'kcal / 100 g', type: 'number' },
 			{ key: 'botanicalFruit', label: 'Botanical fruit', type: 'boolean' }

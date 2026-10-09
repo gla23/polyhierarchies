@@ -10,8 +10,13 @@ const examples = [
 	{ dataset: 'food', node: 'tomato' }
 ];
 
-const datasetId = ref(examples[0]!.dataset);
-const nodeId = ref(examples[0]!.node);
+/** `node=medicine/viral-pneumonia` in the address opens on that node */
+const props = defineProps<{ query?: Record<string, string> }>();
+const [askedData, askedNode] = props.query?.node?.split('/') ?? [];
+const asked = askedData && askedNode && current[askedData]?.nodes.some((node) => node.id === askedNode);
+
+const datasetId = ref(asked ? askedData! : examples[0]!.dataset);
+const nodeId = ref(asked ? askedNode! : examples[0]!.node);
 const graph = computed(() => createGraph(current[datasetId.value]!));
 const nodes = computed(() =>
 	[...graph.value.data.nodes].sort((a, b) => a.label.localeCompare(b.label))

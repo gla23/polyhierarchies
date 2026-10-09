@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import type { ShowSelect } from '@directus/extensions';
-import type { Ref } from 'vue';
+import type { ShowSelect } from './types';
+import type { FunctionalComponent, Ref, Slot, Slots } from 'vue';
 // CORE CHANGES
 // import type { Header, Item } from "./types";
-import type { Header, Item } from '../core-clones/components/v-table/types';
-import { computed, inject } from 'vue';
+import type { Header, Item } from './types';
+import { useTableKit } from './kit';
+import { inject, onBeforeUnmount, onMounted, ref } from 'vue';
 
 const props = withDefaults(
 	defineProps<{
@@ -35,7 +36,24 @@ const props = withDefaults(
 		subdued?: boolean;
 		sortedManually?: boolean;
 		hasClickListener?: boolean;
-		height?: number;
+		/**
+		 * The table's own slots, `item.<column>` and `item-append`, drawn here by name: as slots of the
+		 * row's they'd be forwarded, and Vue redraws every row with forwarded slots whenever anything
+		 * above it redraws (Directus does, a few times each time its sidebar opens)
+		 */
+		cellSlots?: Slots;
+		/** A word on the row's placement, after its first cell: where a duplicate lives, how much a fold holds */
+		hint?: { text: string; kind: 'home' | 'loop' | 'count' | 'matches'; tip?: string } | null;
+		/** The column the hint goes in: the tree column, the one with room to spare */
+		hintColumn?: string;
+		/** Drawn in full somewhere else: dimmed, a pointer rather than the item itself */
+		duplicate?: boolean;
+		/** Matches the search */
+		match?: boolean;
+		/** The node the host is looking at, in its full placement */
+		current?: boolean;
+		/** Shown while searching only as part of a route to a match */
+		context?: boolean;
 	}>(),
 	{
 		indent: 0,
@@ -46,19 +64,21 @@ const props = withDefaults(
 		sortedManually: false,
 		hasClickListener: false,
 		treeView: false,
-		height: 48,
 	},
 );
 
-const emit = defineEmits(['click', 'item-selected', 'toggle-children', 'chevron-hover']);
+// The pointer events too: declared, a new listener from the table doesn't count as a change to redraw for
+const emit = defineEmits(['click', 'item-selected', 'toggle-children', 'chevron-hover', 'hint-click', 'mouseenter', 'mouseleave', 'mouseover']);
 
-const cssHeight = computed(() => {
-	return {
-		tableRow: `${props.height + 2}px`,
-		renderTemplateImage: `${props.height - 16}px`,
-		leafMark: `${Math.round((props.height + 2) * 0.55)}px`,
-	};
-});
+// Told to the table, which marks the rows far off screen
+const tableRows = inject<{ added: (row: Element) => void; removed: (row: Element) => void } | null>('table-rows', null);
+const rowElement = ref<HTMLElement>();
+onMounted(() => rowElement.value && tableRows?.added(rowElement.value));
+onBeforeUnmount(() => rowElement.value && tableRows?.removed(rowElement.value));
+
+const SlotOf: FunctionalComponent<{ render: Slot; item: Item }> = ({ render, item }) => render({ item });
+
+const { VCheckbox, VIcon, VTextOverflow, ValueNull, vTooltip } = useTableKit();
 
 const { onSortStart, nestable } = inject('sortable') as {
 	onSortStart: (item: Item, event: MouseEvent) => void;
@@ -107,7 +127,13 @@ function onChevronClick(event: MouseEvent) {
 		emit('toggle-children', event);
 }
 
-function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
+function usePreventClickAfterDragging({
+	mouseDownHandler,
+	clickHandler,
+}: {
+	mouseDownHandler: (item: Item, event: MouseEvent) => void;
+	clickHandler: (event: MouseEvent) => void;
+}) {
 	let dragging = false;
 
 	return {
@@ -138,14 +164,24 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 
 <template>
 	<tr
+		ref="rowElement"
 		class="table-row"
+		:data-node="item['--node']"
+		:data-key="item['--key']"
 		:class="{
 			subdued,
 			clickable: hasClickListener,
 			sorting,
 			collapsed,
+			duplicate,
+			match,
+			context,
+			current,
 		}"
 		@click="onClick"
+		@mouseenter="emit('mouseenter', $event)"
+		@mouseleave="emit('mouseleave', $event)"
+		@mouseover="emit('mouseover', $event)"
 	>
 		<td
 			class="cell controls"
@@ -243,12 +279,14 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 			v-for="header in headers"
 			:key="header.value"
 			class="cell"
-			:class="`align-${header.align}`"
+			:class="[`align-${header.align}`, { placed: header.value === hintColumn && hint }]"
 		>
-			<slot
-				:name="`item.${header.value}`"
-				:item="item"
-			>
+			<SlotOf
+				v-if="cellSlots?.[`item.${header.value}`]"
+				:render="cellSlots[`item.${header.value}`]!"
+				:item
+			/>
+			<template v-else>
 				<v-text-overflow
 					v-if="
 						header.value.split('.').reduce((acc, val) => {
@@ -262,21 +300,118 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 					"
 				/>
 				<value-null v-else />
-			</slot>
+			</template>
+			<!-- A button: it does something of its own (see the table's onHintClick), not open the item -->
+			<button
+				v-if="header.value === hintColumn && hint"
+				v-tooltip="hint.tip"
+				type="button"
+				class="placement-hint"
+				:class="hint.kind"
+				@click.stop="emit('hint-click', hint.kind)"
+			>
+				{{ hint.text }}
+			</button>
 		</td>
 
 		<td class="spacer cell" />
 		<td
-			v-if="$slots['item-append']"
+			v-if="cellSlots?.['item-append']"
 			class="append cell"
 			@click.stop
 		>
-			<slot name="item-append" />
+			<SlotOf :render="cellSlots['item-append']" :item />
 		</td>
 	</tr>
 </template>
 
 <style lang="scss" scoped>
+/* The host's focus: a bar where the row's indent ends and a faint tint, so it's findable without
+   competing with selection */
+.table-row.current {
+	--v-table-background-color: var(--theme--background-subdued);
+}
+
+.table-row.current .cell.controls .cell-style {
+	box-shadow: inset 3px 0 var(--theme--primary);
+}
+
+.placement-hint:hover {
+	color: var(--theme--primary);
+}
+
+/* Taken to a row by a hint: a brief pulse, so the eye finds it */
+.table-row.flash {
+	animation: row-flash 900ms ease-out;
+}
+
+@keyframes row-flash {
+	from {
+		opacity: 0.3;
+	}
+}
+
+/* Another placement of the row being hovered: lit as the hover is */
+.table-row[data-echo] .cell:not(.controls),
+.table-row[data-echo] .cell.controls .cell-style {
+	background-color: var(--theme--background-subdued);
+}
+
+/* Searching: the matches stand out, and the rows that only lead to them step back. The tint starts
+   where the row's indent ends, as the hover's does, so the guides' column stays clear. */
+.table-row.match .cell:not(.controls),
+.table-row.match .cell.controls .cell-style {
+	background-color: var(--theme--primary-background);
+}
+
+.table-row.match .cell:not(.controls) {
+	font-weight: 600;
+}
+
+.table-row.context .cell:not(.controls) > * {
+	opacity: 0.6;
+}
+
+/* A duplicate points at the full placement elsewhere, so it reads as quieter than the real thing */
+.table-row.duplicate .cell:not(.controls) > * {
+	opacity: 0.55;
+}
+
+.placement-hint {
+	padding: 0;
+	font: inherit;
+	background: none;
+	border: none;
+	cursor: pointer;
+	/* Gives way long before the cell's own content does: the name matters more than the count */
+	flex-shrink: 1000;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	margin-left: 8px;
+	font-size: 12px;
+	white-space: nowrap;
+	color: var(--theme--foreground-subdued);
+}
+
+.placement-hint.loop {
+	color: var(--theme--warning);
+}
+
+/* Except the way to a search's matches, which matters more than the end of a name */
+.placement-hint.matches {
+	flex-shrink: 0;
+}
+
+/* Still shrinks, once the hint has gone, so a long name ends in an ellipsis rather than overflowing */
+.cell.placed > :first-child {
+	min-width: 0;
+}
+
+.table-row.duplicate .cell:not(.controls) > .placement-hint {
+	opacity: 1;
+}
+
 .chevron-slot {
 	display: flex;
 	flex-shrink: 0;
@@ -339,14 +474,21 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
    folder has a chevron. */
 .leaf-mark {
 	width: 2px;
-	height: v-bind('cssHeight.leafMark');
+	height: var(--tree-table-leaf-mark-height);
 	background: var(--theme--foreground-subdued);
 	border-radius: 1px;
 	opacity: 0.5;
 }
 
     .table-row {
-	height: v-bind('cssHeight.tableRow');
+	height: var(--tree-table-row-height);
+
+	/* Far off screen (see the table's farRows): the row's box, which keeps its height, but no cells.
+	   Important over each kind of cell's own display */
+	&[data-far] > .cell {
+		display: none !important;
+	}
+
 
 	.cell {
 		display: flex;
@@ -486,10 +628,10 @@ function usePreventClickAfterDragging({ mouseDownHandler, clickHandler }) {
 	}
 
 	:deep(.render-template) {
-		height: v-bind('cssHeight.tableRow');
+		height: var(--tree-table-row-height);
 
 		img {
-			height: v-bind('cssHeight.renderTemplateImage');
+			height: var(--tree-table-image-height);
 		}
 	}
 }

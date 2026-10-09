@@ -14,7 +14,12 @@ Read README.md for the layout and the model. British spelling.
 - **Edits are pure functions** in `packages/core/src/edit.ts`, returning a new dataset. A UI only
   decides which gesture calls which `GraphEditor` method; the playground saves the result.
 - **Tree-shaped UIs share `useTree`** (`packages/ui/src/tree.ts`) for which placement is full,
-  which are duplicates and loops, and fold state — so the rule can't drift between them.
+  which are duplicates and loops, and fold state — so the rule can't drift between them. The
+  shared tree table draws from `placementTree()` in the same file.
+- **The tree table in `packages/ui/src/table/` is the Directus layout's own**, used by both the
+  extension and the playground. It takes Directus's components (checkbox, icon, menu, tooltip,
+  translations) from an injected `TableKit` and never uses Directus globals directly: the extension
+  provides Directus's, the playground the look-alikes in `packages/ui/src/kit/`.
 - Datasets are written as indented outlines (see `packages/core/src/outline.ts`) so they read like
   the hierarchy they describe, with icons, colours and column values in a separate `details` map.
 - Controls are real `<button>`s so keyboard-hint extensions (Vimium) can reach them.

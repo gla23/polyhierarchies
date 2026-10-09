@@ -19,6 +19,29 @@ export interface GraphEditor {
 	open(id: string): void;
 }
 
+/**
+ * Edits made while the graph is shown upside down (see `invert`), turned the right way up before
+ * they're stored. A row's parent on screen is its child in the data, so each call swaps the two
+ * ends. The order of a node's parents isn't kept, so a move appends rather than going to `index`.
+ */
+export function invertedEditor(editor: GraphEditor): GraphEditor {
+	return {
+		...editor,
+		add(parent, label) {
+			const id = editor.add(null, label);
+			if (parent) editor.link(id, parent);
+			return id;
+		},
+		link: (parent, child) => editor.link(child, parent),
+		unlink: (parent, child) => editor.unlink(child, parent),
+		move(child, from, to) {
+			if (from === to) return;
+			if (from) editor.unlink(child, from);
+			if (to) editor.link(child, to);
+		}
+	};
+}
+
 export type Density = 'compact' | 'cosy' | 'comfortable';
 
 export type Motion = 'auto' | 'on' | 'off';

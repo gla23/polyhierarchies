@@ -1,7 +1,12 @@
+import type { ConceptId } from './concepts';
+
 /** Polyhierarchies to try in the browser. Steps may hold [links](url) and `code`. */
 export interface Shot {
 	/** Under public/ */
 	src: string;
+	/** Its pixel size, so the page keeps the space for it before it loads and nothing jumps */
+	width: number;
+	height: number;
 	alt: string;
 	/** What to notice in it */
 	caption: string;
@@ -18,6 +23,8 @@ export interface PriorArtEntry {
 	/** A walkthrough for someone who has never seen the site */
 	steps: string[];
 	shots?: Shot[];
+	/** The concept pages it's an example for */
+	concepts?: ConceptId[];
 }
 
 export const sections: { title: string; about: string; entries: PriorArtEntry[] }[] = [
@@ -27,6 +34,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 		entries: [
 			{
 				name: 'TheBrain',
+				concepts: ['siblings'],
 				href: 'https://app.thebrain.com/brain/3d80058c-14d8-5361-0b61-a061f89baf87/2099a623-aa4f-24d4-26da-29bc310b84dd',
 				summary: 'Jerry Michalski\'s public brain: over half a million thoughts, each drawn with everything it\'s linked to around it.',
 				points: [
@@ -47,12 +55,16 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/thebrain-1.jpg',
+						width: 2730,
+						height: 840,
 						alt: 'TheBrain\'s plex centred on the thought Tomatoes, with six parent thoughts above it (Berries, Carotenoids, Climacteric (botany), Native Plants of the Americas, Nightshades (Solanaceae) and Vegetables), dozens of children below and siblings down the right.',
 						caption: 'Outlined: Tomatoes\' six parents, Berries and Vegetables among them, none of them the main one.',
 						point: null
 					},
 					{
 						src: 'prior-art/thebrain-2.jpg',
+						width: 1610,
+						height: 680,
 						alt: 'The same plex with the mouse over the parent Vegetables: lines from it light up to a group of thoughts on the right, including Allium, Artichokes, Asparagus and Avocados.',
 						caption: 'Outlined: hovering the parent Vegetables lights up its other children on the right, which are Tomatoes\' siblings through it.',
 						point: 1
@@ -61,6 +73,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'Wikipedia categories',
+				concepts: ['looking-up', 'cycles'],
 				href: 'https://en.wikipedia.org/wiki/Special:CategoryTree?target=Category%3ATomatoes&mode=parents&namespaces=',
 				summary: 'Every Wikipedia page and category can sit in several categories, and there is a hidden tool that draws a category\'s parents as a tree.',
 				points: [
@@ -79,12 +92,16 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/wikipedia-1.jpg',
+						width: 920,
+						height: 400,
 						alt: 'Special:CategoryTree in parents mode: Tomatoes at the top, and under it the categories it belongs to, from Fruit vegetables and Edible fruits to Solanum.',
 						caption: 'Outlined: every category Tomatoes is filed in, drawn as a tree that grows upwards.',
 						point: null
 					},
 					{
 						src: 'prior-art/wikipedia-2.jpg',
+						width: 920,
+						height: 488,
 						alt: 'The same tree with Fruit vegetables opened to show its own parents, Edible fruits and Vegetables. Edible fruits now appears twice: under Fruit vegetables, and directly under Tomatoes.',
 						caption: 'Outlined: Edible fruits twice, because Tomatoes reaches it directly and through Fruit vegetables.',
 						point: 2
@@ -93,6 +110,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'TiddlyWiki',
+				concepts: ['siblings'],
 				href: 'https://tiddlywiki.com/',
 				summary: 'A wiki that runs entirely in the page, where tags are parents and the site\'s own table of contents is built from them.',
 				points: [
@@ -111,12 +129,16 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/tiddlywiki-1.jpg',
+						width: 640,
+						height: 600,
 						alt: 'TiddlyWiki\'s sidebar Contents tab with Welcome and Working with TiddlyWiki both open; GettingStarted is listed under each.',
 						caption: 'Outlined: GettingStarted in two places in the contents, because it has two tags.',
 						point: null
 					},
 					{
 						src: 'prior-art/tiddlywiki-2.jpg',
+						width: 1240,
+						height: 670,
 						alt: 'The GettingStarted note with its two blue tags, Welcome and Working with TiddlyWiki, under the title. The Welcome tag has been clicked, opening a list of every note tagged Welcome: HelloThere, Quick Start, Find Out More, TiddlyWiki on the Web, Testimonials and Reviews, GettingStarted and Community.',
 						caption: 'Outlined: the note\'s two tags, its parents; clicking Welcome lists everything else under it.',
 						point: 2
@@ -143,12 +165,16 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/obsidian-1.jpg',
+						width: 1162,
+						height: 1308,
 						alt: 'The global graph of Obsidian\'s help site: a few hundred grey dots joined by thin lines with no top or bottom, the dots of different sizes, each labelled with a page name.',
 						caption: 'Outlined: the biggest dot, Settings, the page most others link to. Nothing is above anything else.',
 						point: null
 					},
 					{
 						src: 'prior-art/obsidian-2.jpg',
+						width: 2140,
+						height: 720,
 						alt: 'The Graph view help page, with the small INTERACTIVE GRAPH box in the right-hand column showing only this page and the dozen pages it links to.',
 						caption: 'Outlined: the local graph beside the page, just this page and its links. The icons at its top right open the whole site.',
 						point: 1
@@ -163,6 +189,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 		entries: [
 			{
 				name: 'QuickGO',
+				concepts: ['looking-up'],
 				href: 'https://www.ebi.ac.uk/QuickGO/term/GO:0005741',
 				summary: 'One term at a time, with a chart of everything above it.',
 				points: [
@@ -182,18 +209,24 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/quickgo-1.jpg',
+						width: 1980,
+						height: 1694,
 						alt: 'QuickGO ancestor chart for mitochondrial outer membrane: the pale yellow term at the bottom with lines rising through dozens of boxes to cellular component at the top, and a key of line colours on the right.',
 						caption: 'The outlined yellow box is the term; its two outlined parents, organelle outer membrane and mitochondrial membrane, sit side by side with neither more important.',
 						point: null
 					},
 					{
 						src: 'prior-art/quickgo-2.jpg',
+						width: 1618,
+						height: 1290,
 						alt: 'QuickGO ancestor chart for positive regulation of apoptotic process, with black, yellow and green lines, and the line-colour key outlined on the right.',
 						caption: 'Match the line colours to the outlined key: black is "is a", yellow "regulates" and green "positively regulates", so one term belongs to its ancestors in different ways.',
 						point: 1
 					},
 					{
 						src: 'prior-art/quickgo-3.jpg',
+						width: 1901,
+						height: 1620,
 						alt: 'QuickGO ancestor chart for glycolysis: a single yellow box at the bottom fanning out through about fifty broader processes, all converging on metabolic process near the top.',
 						caption: 'From the outlined glycolysis at the bottom, routes fan out through dozens of broader processes before meeting again at the outlined metabolic process.',
 						point: 2
@@ -202,6 +235,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'Ontology Lookup Service',
+				concepts: ['placements'],
 				href: 'https://www.ebi.ac.uk/ols4/ontologies/go/classes/http%253A%252F%252Fpurl.obolibrary.org%252Fobo%252FGO_0005741',
 				summary: 'A browser for hundreds of science vocabularies, with a tree and a graph for every term.',
 				points: [
@@ -222,18 +256,24 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/ols-1.jpg',
+						width: 1040,
+						height: 876,
 						alt: 'The OLS tree for the Gene Ontology, opened down to mitochondrial outer membrane, which appears three times in the visible part, each at the end of a different route.',
 						caption: 'The same term, outlined, turns up at the end of three different routes in just the top of the tree: a folder-style tree has to repeat it for every parent.',
 						point: null
 					},
 					{
 						src: 'prior-art/ols-2.jpg',
+						width: 880,
+						height: 354,
 						alt: 'The top of the OLS tree with purple P badges beside mitochondrion, mitochondrial envelope and mitochondrial membrane.',
 						caption: 'The outlined P badges mark "part of" links; names without one, like cytoplasm, are "a kind of" their parent.',
 						point: 1
 					},
 					{
 						src: 'prior-art/ols-3.jpg',
+						width: 1684,
+						height: 1606,
 						alt: 'The OLS Graph tab with subClassOf and part of ticked: mitochondrial outer membrane in yellow in the middle, red arrows out to its two parents and orange arrows in from three of its parts.',
 						caption: 'The outlined yellow term appears once, with red arrows to its two outlined parents and orange arrows in from the things that are part of it.',
 						point: 2
@@ -242,6 +282,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'MeSH Browser',
+				concepts: ['placements'],
 				href: 'https://meshb.nlm.nih.gov/record/ui?ui=D011024',
 				summary: 'The US National Library of Medicine\'s subject headings, used to index every paper in PubMed.',
 				points: [
@@ -261,12 +302,16 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/mesh-1.jpg',
+						width: 1520,
+						height: 658,
 						alt: 'MeSH record for Pneumonia, Viral, with its four tree numbers C01.748.610.763, C01.925.705, C08.381.677.807 and C08.730.610.763 outlined',
 						caption: 'One heading, four tree numbers (outlined): one for every place it sits in the tree.',
 						point: null
 					},
 					{
 						src: 'prior-art/mesh-2.jpg',
+						width: 1280,
+						height: 1004,
 						alt: 'MeSH Tree Structures tab: Pneumonia, Viral under Respiratory Tract Infections › Pneumonia and again under Virus Diseases, with COVID-19 outlined beneath each',
 						caption: 'COVID-19 (outlined) follows Pneumonia, Viral into each place, with its own number in each.',
 						point: 2
@@ -275,6 +320,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'ICD-11 browser',
+				concepts: ['placements', 'primary-parents'],
 				href: 'https://icd.who.int/browse/2026-01/mms/en#1024154490',
 				summary: 'The World Health Organization\'s classification of diseases, used to count causes of death and illness worldwide.',
 				points: [
@@ -293,18 +339,24 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/icd11-1.jpg',
+						width: 800,
+						height: 930,
 						alt: 'ICD-11 tree under CA40 Pneumonia, with four grey entries outlined: 1F57.2 Pulmonary toxoplasmosis, 1D65 Severe acute respiratory syndrome, KB24 Congenital pneumonia and CA43.1 Abscess of lung with pneumonia',
 						caption: 'The grey entries (outlined) belong under Pneumonia too, but live somewhere else; their codes don\'t start CA40.',
 						point: null
 					},
 					{
 						src: 'prior-art/icd11-2.jpg',
+						width: 1920,
+						height: 1486,
 						alt: 'ICD-11 with 1D65 Severe acute respiratory syndrome selected: the grey entry in the tree and its single code, 1D65, both outlined',
 						caption: 'Click a grey entry and it has one code (outlined): 1D65 starts with 1, so its home is chapter 01 at the top of the tree.',
 						point: 2
 					},
 					{
 						src: 'prior-art/icd11-3.jpg',
+						width: 1920,
+						height: 402,
 						alt: 'ICD-11 Foundation page for Severe acute respiratory syndrome, with its Parent(s) box outlined listing Certain zoonotic viral diseases and Pneumonia',
 						caption: 'In the Foundation underneath, the same disease has two parents (outlined), as equals.',
 						point: 0
@@ -313,6 +365,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'SNOMED CT browser',
+				concepts: ['primary-parents'],
 				href: 'https://snomedbrowser.org/?perspective=full&conceptId1=75570004&languages=en',
 				summary: 'The official browser for SNOMED CT, the clinical terminology behind many health records.',
 				points: [
@@ -331,18 +384,24 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/snomed-1.jpg',
+						width: 1400,
+						height: 634,
 						alt: 'SNOMED CT browser Summary for Viral pneumonia, with the Parents box outlined listing Pneumonia (disorder) and Viral lower respiratory infection (disorder)',
 						caption: 'Two parents (outlined), and neither is the main one.',
 						point: null
 					},
 					{
 						src: 'prior-art/snomed-3.jpg',
+						width: 1400,
+						height: 634,
 						alt: 'SNOMED CT browser Summary for Viral pneumonia, with its definition box outlined: finding site lung, inflammatory morphology, infectious process, causative agent virus',
 						caption: 'The definition (outlined) is what decides the parents: lung, inflammation, infection, virus.',
 						point: 1
 					},
 					{
 						src: 'prior-art/snomed-2.jpg',
+						width: 1400,
+						height: 514,
 						alt: 'SNOMED CT browser in Stated view, with the Stated button and the Parents box outlined; the only parent listed is Disease (disorder)',
 						caption: 'Switch to Stated (outlined) and the authors only wrote Disease: the two real parents were worked out by the reasoner.',
 						point: 2
@@ -357,6 +416,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 		entries: [
 			{
 				name: 'Graphviz Online',
+				concepts: ['cycles'],
 				href: 'https://dreampuf.github.io/GraphvizOnline/',
 				summary: 'Type a graph as text on the left and Graphviz draws it on the right as you type.',
 				points: [
@@ -375,18 +435,24 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/graphviz-1.jpg',
+						width: 2200,
+						height: 1200,
 						alt: 'Graphviz Online with the Food, Fruit, Vegetable graph typed on the left and drawn on the right; Tomato sits in the bottom row under both Fruit and Vegetable.',
 						caption: 'Tomato, outlined, sits centred under both its parents, with an arrow from each.',
 						point: null
 					},
 					{
 						src: 'prior-art/graphviz-2.jpg',
+						width: 2200,
+						height: 1200,
 						alt: 'The same graph with the line Tomato -> Food added; the new arrow runs straight up from Tomato to Food while the rows stay as they were.',
 						caption: 'The outlined arrow closes the loop: dot draws it pointing back up, and every other node keeps its row.',
 						point: 1
 					},
 					{
 						src: 'prior-art/graphviz-3.jpg',
+						width: 2200,
+						height: 1200,
 						alt: 'The same looped graph drawn with the neato engine: the nodes are scattered diagonally with no rows, and Tomato sits beside Food.',
 						caption: 'With neato there are no rows, so the outlined Tomato and its parents no longer read top to bottom.',
 						point: 2
@@ -395,6 +461,7 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 			},
 			{
 				name: 'd3-dag',
+				concepts: ['looking-up'],
 				href: 'https://erikbrinkman.github.io/d3-dag/documents/examples.html?layout=sugiyama',
 				summary: 'Layered layouts for graphs where a node can have several parents, with every setting in a dropdown.',
 				points: [
@@ -413,18 +480,24 @@ export const sections: { title: string; about: string; entries: PriorArtEntry[] 
 				shots: [
 					{
 						src: 'prior-art/d3-dag-1.jpg',
+						width: 1424,
+						height: 1200,
 						alt: 'd3-dag\'s examples page showing the 22-node grafo graph in layers; node 7 is at the bottom with four incoming lines from nodes 21, 17, 20 and 3.',
 						caption: 'Node 7, outlined, has four parents and sits on a row below every one of them.',
 						point: null
 					},
 					{
 						src: 'prior-art/d3-dag-2.jpg',
+						width: 1424,
+						height: 1200,
 						alt: 'The same layout with the line from node 21 down to node 7 outlined; it runs down the right-hand side past several rows without crossing any box.',
 						caption: 'The outlined line from 21 to 7 skips four rows and is threaded down a lane of its own.',
 						point: 1
 					},
 					{
 						src: 'prior-art/d3-dag-3.jpg',
+						width: 1424,
+						height: 1200,
 						alt: 'The same graph with Layering set to topological: each node has a row of its own, so the drawing is a tall thin column of boxes and long vertical lines.',
 						caption: 'Change only the outlined Layering setting and the same graph turns into a tall column, one node per row.',
 						point: 2

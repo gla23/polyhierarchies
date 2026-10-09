@@ -12,10 +12,12 @@ already the one the **extensions** package up for Directus.
 packages/
   core/        Framework-free: the polyhierarchy model, graph queries, and the in-memory datasets
   ui/          Vue components, styled with Directus's theme variables (theme.css supplies them
-               standalone, so a component looks the same in the playground and in the admin)
+               standalone, so a component looks the same in the playground and in the admin).
+               src/table/ is the tree table the Directus layout and the playground both draw,
+               imported by the extension as @polyhierarchies/ui/table
   playground/  Vite + Vue app for prototyping, explaining and demoing each UI
 extensions/
-  tree-view-table-layout/   Directus Labs' layout, the starting point: one parent per item
+  tree-view-table-layout/   The Directus tree view layout, grown from Directus Labs' own
 ```
 
 ## The model
@@ -39,9 +41,11 @@ bun run dev        # the playground
 bun run build      # every package and extension
 ```
 
-`extensions/tree-view-table-layout` is Directus Labs' layout exactly as published, building with
-its own settings — the baseline the shared components are measured against, not yet using them.
-The one change is declaring `@directus/composables` and `@directus/system-data`, which labs only
-got transitively: Bun's isolated installs don't expose undeclared packages, and a package left
-external breaks at runtime, as Directus doesn't share them with extensions. If a build warns that
-an `@directus/…` import "could not be resolved", declare that one too.
+`extensions/tree-view-table-layout` began as Directus Labs' layout. Its table now lives in
+`packages/ui/src/table/`, shared with the playground's Tree table, and draws *placements* rather
+than items: one row per route to a node, so the same table shows a taxonomy (one parent each) and a
+polyhierarchy. The extension keeps what only Directus has: the query, the options panel, the item
+page, saving. It declares `@directus/composables` and `@directus/system-data`, which labs only got
+transitively: Bun's isolated installs don't expose undeclared packages, and a package left external
+breaks at runtime, as Directus doesn't share them with extensions. If a build warns that an
+`@directus/…` import "could not be resolved", declare that one too.

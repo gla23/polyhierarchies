@@ -103,6 +103,24 @@ export function createGraph(data: Polyhierarchy) {
 
 	const rootSet = new Set(roots);
 
+	/** Distinct nodes anywhere below, each counted once however many routes reach it */
+	const descendantCounts = new Map<string, number>();
+	const descendantCount = (id: string) => {
+		let count = descendantCounts.get(id);
+		if (count === undefined) {
+			const seen = new Set([id]);
+			const stack = [...children(id)];
+			while (stack.length) {
+				const next = stack.pop()!;
+				if (seen.has(next)) continue;
+				seen.add(next);
+				stack.push(...children(next));
+			}
+			descendantCounts.set(id, (count = seen.size - 1));
+		}
+		return count;
+	};
+
 	/**
 	 * Every route from a root down to `id`, each root first. It climbs only edges that don't close a
 	 * cycle: a route round a loop isn't a route from the top, and allowing them let a well-connected
@@ -143,6 +161,7 @@ export function createGraph(data: Polyhierarchy) {
 		ancestors: (id: string, max = Infinity) => rings(id, parents, max),
 		/** Children, then grandchildren, …, up to `max` levels */
 		descendants: (id: string, max = Infinity) => rings(id, children, max),
+		descendantCount,
 		stats: {
 			nodes: data.nodes.length,
 			edges: data.edges.length,
