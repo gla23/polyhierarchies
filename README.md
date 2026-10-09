@@ -1,7 +1,8 @@
 This repo is two things:
 
-- A playground showing [Research and UI examples](gla23.github.io/polyhierarchies) for exploring the two types of hierarchy: **taxonomy** (one parent each, through a many-to-one field) and **polyhierarchy** (any number of
-parents, through a links collection)
+- A playground showing [Research and UI examples](https://gla23.github.io/polyhierarchies/) for exploring the two types of hierarchy:
+  - **Tree**: one parent each through a many-to-one field
+  - **Polyhierarchy**: any number of parents through a junction table
 - A Directus extension that upgrades Directus Labs'
 [Tree View Table Layout](https://github.com/directus-labs/extensions/tree/main/packages/tree-view-table-layout) to handle both of these magical entities
 
