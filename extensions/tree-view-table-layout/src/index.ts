@@ -63,6 +63,19 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			sortField,
 		} = useCollection(collection);
 
+		/**
+		 * Directus's own table's columns, widths and alignments in the same saved view. Until this
+		 * layout has its own, it shows those, so switching to it keeps the columns you had.
+		 */
+		const presetsStore = system.stores.usePresetsStore?.();
+		const tabular = computed(() => {
+			const preset = collection.value ? presetsStore?.getPresetForCollection?.(collection.value) : null;
+			return {
+				fields: preset?.layout_query?.tabular?.fields as string[] | undefined,
+				widths: preset?.layout_options?.tabular?.widths as Record<string, number> | undefined,
+				align: preset?.layout_options?.tabular?.align as Record<string, 'left' | 'center' | 'right'> | undefined,
+			};
+		});
 		const { sort, limit, page, fields } = useItemOptions();
 		// Before anything reads the options it fills in
 		const defaults = useSchemaDefaults();
@@ -79,13 +92,15 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			),
 		);
 
+		// Before the parent field, which a flat view leaves unset
+		const hierarchy = withDefault(syncRefProperty(layoutOptions, 'hierarchy', undefined), defaults.hierarchy);
+
 		const { parentField, fieldsToQuery } = useTreeViewFieldsToQuery({
 			fieldsWithRelationalAliased,
 			primaryKeyField,
 			sortField,
 		});
 
-		const hierarchy = withDefault(syncRefProperty(layoutOptions, 'hierarchy', undefined), defaults.hierarchy);
 		const junction = withDefault(syncRefProperty(layoutOptions, 'junction', undefined), defaults.junction);
 		const junctionParent = withDefault(syncRefProperty(layoutOptions, 'junctionParent', undefined), computed(() => defaults.ends(junction.value).parent));
 		const junctionChild = withDefault(syncRefProperty(layoutOptions, 'junctionChild', undefined), computed(() => defaults.ends(junction.value).child));
@@ -125,6 +140,13 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				? !!(junction.value && junctionParent.value && junctionChild.value)
 				: !!parentField.value,
 		);
+		/**
+		 * Flat, a search or filter that hides goes in Directus's own query, which leaves only the
+		 * matches, page by page. Marking them in place, or a filter turned off, can't: the table marks
+		 * them among every row, as a tree's are (`useSearchMatches`).
+		 */
+		const searchOnServer = computed(() => !treeActive.value && searchMode.value !== 'inplace');
+		const filterOnServer = computed(() => !treeActive.value && (filterMode.value === 'hide' || filterMode.value === 'routes'));
 
 		const {
 			items,
@@ -143,8 +165,8 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			page: computed({ get: () => (treeActive.value ? 1 : page.value), set: (value) => (page.value = value) }),
 			fields: fieldsToQuery,
 			alias: aliasQuery,
-			filter: computed(() => (treeActive.value ? null : filter.value)),
-			search: computed(() => (treeActive.value ? null : search.value)),
+			filter: computed(() => (filterOnServer.value ? filter.value : null)),
+			search: computed(() => (searchOnServer.value ? search.value : null)),
 			filterSystem,
 		});
 
@@ -204,7 +226,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			const by = tableSort.value?.by;
 			return !!by && by !== sortField.value && by !== primaryKeyField.value?.field;
 		});
-		const { matches, keep, highlightMode, searching } = useSearchMatches();
+		const { matches, keep, highlightMode, searching, searchedFor } = useSearchMatches();
 		const showing = ref<{ items: number; matching: number } | null>(null);
 		/**
 		 * Highlights that stand out, some of what's shown but not all of it: only then is there a next
@@ -265,6 +287,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			modeMenus,
 			highlightMode,
 			searching,
+			searchedFor,
 			offerNext,
 			setShowing: (counts: { items: number; matching: number } | null) => (showing.value = counts),
 			keep,
@@ -312,7 +335,8 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		 * Sensible defaults, so a collection shows as a tree without being set up. A parent field: the
 		 * collection's one self-referencing many-to-one, if it has just one. Failing that, a
 		 * polyhierarchy over a junction: a collection with two many-to-ones to this one, the parent
-		 * guessed by name and the sort from the relation (or a field called sort). The tree column: the
+		 * guessed by name and the sort from the relation (or a field called sort). With neither, flat.
+		 * The tree column: the
 		 * field the display template starts with, or the first plain text field shown, never a colour
 		 * or an icon, which are too narrow to indent.
 		 */
@@ -338,8 +362,13 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			});
 
 			const parent = computed(() => (selfReferencing.value.length === 1 ? selfReferencing.value[0]!.field : null));
-			const hierarchy = computed<'taxonomy' | 'polyhierarchy'>(() =>
-				layoutOptions.value?.parent || parent.value || !junctions.value.length ? 'taxonomy' : 'polyhierarchy',
+			// Nothing to nest by: flat, rather than a taxonomy waiting to be set up
+			const hierarchy = computed<'taxonomy' | 'polyhierarchy' | 'flat'>(() =>
+				layoutOptions.value?.parent || parent.value
+					? 'taxonomy'
+					: junctions.value.length
+						? 'polyhierarchy'
+						: selfReferencing.value.length ? 'taxonomy' : 'flat',
 			);
 			const junction = computed(() => junctions.value[0]?.[0] ?? null);
 
@@ -446,8 +475,9 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 
 			const fields = computed({
 				get() {
-					return layoutQuery.value?.fields
-						? layoutQuery.value.fields.filter((field) =>
+					const chosen = layoutQuery.value?.fields ?? tabular.value.fields;
+					return chosen
+						? chosen.filter((field) =>
 								fieldsStore.getField(collection.value!, field),
 							)
 						: unref(fieldsDefaultValue);
@@ -545,9 +575,11 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 							width:
                                 localWidths.value[field.key]
                                 || layoutOptions.value?.widths?.[field.key]
+                                || tabular.value.widths?.[field.key]
                                 || null,
 							align:
                                 layoutOptions.value?.align?.[field.key]
+                                || tabular.value.align?.[field.key]
                                 || 'left',
 							field: {
 								display:
@@ -647,7 +679,12 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			primaryKeyField: ComputedRef<Field | null>;
 			sortField: ComputedRef<string | null>;
 		}) {
-			const parentField = withDefault(syncRefProperty(layoutOptions, 'parent', null), defaults.parent);
+			const parentChoice = withDefault(syncRefProperty(layoutOptions, 'parent', null), defaults.parent);
+			// Flat, nothing nests, though the parent chosen is kept for going back to a taxonomy
+			const parentField = computed<string | null>({
+				get: () => (hierarchy.value === 'flat' ? null : parentChoice.value),
+				set: (value) => (parentChoice.value = value),
+			});
 
 			const fieldsToQuery = computed(() => {
 				// A copy, or the pushes below would grow the relational fields list itself
@@ -963,15 +1000,28 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		}
 
 		/**
-		 * Searching or filtering a tree: Directus finds the matching items, with the same search and
-		 * filter it would have applied to the list, asked separately so each can have its own mode.
-		 * Hide layers keep only what matches (`keep`); highlight layers combine, as Directus's search
-		 * and filter do, both must match (`matches`); the search's mode decides how highlights show.
+		 * Searching or filtering a tree, or marking matches in place in a flat list: Directus finds the
+		 * matching items, with the same search and filter it would have applied to the list, asked
+		 * separately so each can have its own mode. Hide layers keep only what matches (`keep`);
+		 * highlight layers combine, as Directus's search and filter do, both must match (`matches`);
+		 * the search's mode decides how highlights show. Flat, hiding is left to the list's own query.
 		 */
 		function useSearchMatches() {
 			const api = useApi();
 			const filterSet = ref<Set<string> | null>(null);
 			const searchSet = ref<Set<string> | null>(null);
+			const filterHere = computed(() => !!filterUser.value && filterMode.value !== 'off' && !filterOnServer.value);
+			const searchHere = computed(() => !!search.value && !searchOnServer.value);
+			/**
+			 * The search the matches are for, or with the search in the list's query, the search the rows
+			 * came for: Enter in the search waits for them, as picking from a stale answer would tick the
+			 * wrong item
+			 */
+			const searchedFor = ref<string | null>(null);
+			watch(items, () => {
+				if (searchOnServer.value)
+					searchedFor.value = search.value ?? null;
+			});
 			let asked = 0;
 			async function idsWith(params: Record<string, unknown>, pk: string) {
 				const response = await api.get(getEndpoint(collection.value!), { params: { fields: [pk], limit: -1, ...params } });
@@ -980,28 +1030,33 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			async function find() {
 				const pk = primaryKeyField.value?.field;
 				const ask = ++asked;
-				if (!treeActive.value || !pk) {
+				const searched = search.value ?? null;
+				if (!pk || (!filterHere.value && !searchHere.value)) {
 					filterSet.value = searchSet.value = null;
+					if (!searchOnServer.value)
+						searchedFor.value = searched;
 					return;
 				}
 				try {
-					const [filtered, searched] = await Promise.all([
-						filterUser.value && filterMode.value !== 'off' ? idsWith({ filter: filter.value }, pk) : null,
-						search.value ? idsWith({ search: search.value }, pk) : null,
+					const [filteredIds, searchedIds] = await Promise.all([
+						filterHere.value ? idsWith({ filter: filter.value }, pk) : null,
+						searchHere.value ? idsWith({ search: searched }, pk) : null,
 					]);
 					// A newer search may have finished first
 					if (ask === asked) {
-						filterSet.value = filtered;
-						searchSet.value = searched;
+						filterSet.value = filteredIds;
+						searchSet.value = searchedIds;
 					}
 				}
 				catch {
 					if (ask === asked)
 						filterSet.value = searchSet.value = null;
 				}
+				if (ask === asked && !searchOnServer.value)
+					searchedFor.value = searched;
 			}
 			// A mode turned off and on again fetches afresh, as nothing was kept while it was off
-			watch([treeActive, filter, filterUser, search, () => filterMode.value === 'off'], find, { immediate: true, deep: true });
+			watch([treeActive, filter, filterUser, search, filterHere, searchHere], find, { immediate: true, deep: true });
 
 			const both = (sets: (Set<string> | null)[]) => {
 				const present = sets.filter((set): set is Set<string> => !!set);
@@ -1019,7 +1074,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			);
 			// Searching rather than only filtering: what the hints and the count call the highlights
 			const searching = computed(() => !!searchSet.value);
-			return { matches, keep, highlightMode, searching };
+			return { matches, keep, highlightMode, searching, searchedFor };
 		}
 
 		function useSaveEdits() {

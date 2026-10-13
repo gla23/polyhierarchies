@@ -68,7 +68,6 @@ const conceptTitle = (id: string) => concepts.find((concept) => concept.id === i
 
 /** Short enough to sit in a row of cassette keys; the full name is in the key's title */
 const shortNames: Record<string, string> = {
-	animals: 'Plain tree',
 	tasks: 'Tasks',
 	food: 'Food',
 	'challenges-for-kids': 'TheBrain map',

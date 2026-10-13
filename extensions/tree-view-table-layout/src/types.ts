@@ -14,7 +14,7 @@ export interface LayoutOptions {
 	limit?: number;
 	spacing?: 'comfortable' | 'cozy' | 'compact';
 	/** One parent field (a taxonomy), or a junction of parent → child links (a polyhierarchy) */
-	hierarchy?: 'taxonomy' | 'polyhierarchy';
+	hierarchy?: 'taxonomy' | 'polyhierarchy' | 'flat';
 	parent?: string | null;
 	/** In a polyhierarchy: the junction collection, which of its fields is the parent and which the
 	 *  child, and the integer field ordering one parent's children */

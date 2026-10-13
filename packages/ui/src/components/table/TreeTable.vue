@@ -101,7 +101,7 @@ const matches = computed(() => {
 const selection = ref<string[]>([]);
 /** While searching, what the table shows and how much of it matches, as the layout's count says */
 const showing = ref<{ items: number; matching: number } | null>(null);
-/** Enter in the search goes to the next match; the one it's at, as the layout's Next button says */
+/** Enter or ↓ in the search goes to the next match; the one it's at, as the layout's Next button says */
 const table = ref<InstanceType<typeof SharedTreeTable>>();
 /** Some of what's shown matches, not all, as the layout has it: only then a next one, or a count */
 const offerNext = computed(() => !!showing.value && showing.value.matching > 0 && showing.value.matching < showing.value.items);
@@ -159,6 +159,8 @@ function onEdits(edits: { moved?: Moved | null }) {
 				type="search"
 				placeholder="Search"
 				@keydown.enter.prevent="goToMatch"
+				@keydown.down.prevent="table?.goToMatch(1, { arrow: true })"
+				@keydown.up.prevent="table?.goToMatch(-1, { arrow: true })"
 				@keydown.esc.prevent="table?.focusTable()"
 				@focus="searchFocused = true"
 				@blur="searchFocused = false"
@@ -167,7 +169,7 @@ function onEdits(edits: { moved?: Moved | null }) {
 				v-if="matches && offerNext && matchPosition?.of"
 				type="button"
 				class="next"
-				title="Select the next match, opening the way to it, and carry on with the arrow keys (Shift-click, or Shift+Enter in the search, goes back). Esc in the search goes into the table too"
+				title="Select the next match, opening the way to it, and carry on with the arrow keys. ↓ or Enter in the search does the same, and Shift-click, ↑ or Shift+Enter goes back. Esc in the search goes into the table too"
 				@click="nextFromButton"
 			>
 				{{ matchPosition.at ? `${matchPosition.at}/${matchPosition.of}` : 'Next' }}{{ searchFocused && search.trim() ? ' ↵' : '' }}

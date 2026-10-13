@@ -638,16 +638,28 @@ const rowFolded = (item: Item) =>
 		? !searchRoutes.value.parents.has(item[rowKey]) || !routeOpen(item[rowKey])
 		: isFolded(item);
 
+/** Each row showing, by key, with its place among them (see `isFar`) */
+const shownIndex = computed(() => {
+	const index = new Map<string, number>();
+	for (const row of internalItems.value) {
+		if (!rowHidden(row))
+			index.set(String(row[rowKey]), index.size);
+	}
+	return index;
+});
+/** The rows showing a fold ago: a row folded away keeps its cells while it folds shut */
+const folding = shallowRef(shownIndex.value);
+let foldPlayed: ReturnType<typeof setTimeout> | undefined;
+watch(shownIndex, (now) => {
+	clearTimeout(foldPlayed);
+	foldPlayed = setTimeout(() => (folding.value = now), animated.value ? 200 : 0);
+});
 /**
  * Whether folds animate. Moving rows lays out every row each frame, so auto counts the rows drawn:
  * in a small tree all of them (folded ones at no height), in a big one only those showing, as
  * hidden ones aren't drawn there. So a huge tree with a few rows open still animates.
  */
-const visibleKeys = computed(() =>
-	internalItems.value.length > 300
-		? new Set(internalItems.value.filter((row) => !rowHidden(row)).map((row) => String(row[rowKey])))
-		: null,
-);
+const visibleKeys = computed(() => (internalItems.value.length > 300 ? shownIndex.value : null));
 const animated = computed(() =>
 	props.motion === 'on' || (props.motion === 'auto' && (visibleKeys.value?.size ?? internalItems.value.length) <= 300),
 );
@@ -661,7 +673,7 @@ let left: ReturnType<typeof setTimeout> | undefined;
 watch(visibleKeys, (now, before) => {
 	if (!now || !before || !animated.value)
 		return;
-	const gone = [...before].filter((key) => !now.has(key));
+	const gone = [...before.keys()].filter((key) => !now.has(key));
 	if (!gone.length || gone.length > 300)
 		return;
 	leaving.value = new Set(gone);
@@ -715,9 +727,12 @@ function echo(node: string | undefined, on: boolean) {
 		row.toggleAttribute('data-echo', on);
 }
 
-/** Where a hint takes you: open the way to a row, scroll it into view and pulse it */
+/**
+ * Where a hint takes you: open the way to a row, scroll it into view and pulse it. Quietly, as for
+ * the next of the rows in sight, only into view: the eye's already there.
+ */
 const tableRoot = ref<HTMLElement>();
-async function goTo(key: string) {
+async function goTo(key: string, quietly = false) {
 	const path = key.split('/');
 	const above = path.slice(0, -1).map((_, end) => path.slice(0, end + 1).join('/'));
 	if (above.length) {
@@ -727,10 +742,14 @@ async function goTo(key: string) {
 			openRows(above);
 	}
 	await nextTick();
-	const row = tableRoot.value?.querySelector<HTMLElement>(`.table-row[data-key="${key.replace(/["\\]/g, '\\$&')}"]`);
+	const row = rowElement(key);
 	if (!row)
 		return;
-	row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+	if (quietly) {
+		revealRow(row, 'nearest');
+		return;
+	}
+	revealRow(row, 'center', true);
 	row.classList.remove('flash');
 	void row.offsetWidth;
 	row.classList.add('flash');
@@ -742,6 +761,23 @@ async function goTo(key: string) {
 		row.removeEventListener('animationend', played);
 	};
 	row.addEventListener('animationend', played);
+}
+const rowElement = (key: string) => tableRoot.value?.querySelector<HTMLElement>(`.table-row[data-key="${key.replace(/["\\]/g, '\\$&')}"]`);
+/**
+ * Scrolled to up or down only. `scrollIntoView` also scrolls sideways whenever a row is wider than
+ * what scrolls it, lining the row's start up with the edge: with Directus's sidebar open, going to
+ * a match slid the whole table a gutter to the left.
+ */
+function revealRow(row: HTMLElement, where: 'center' | 'nearest', smooth = false) {
+	const view = scroller?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight };
+	// Below the sticky header (its row: the head itself has no box), which covers the rows passing under it
+	const top = Math.max(view.top, tableEl.value?.tHead?.rows[0]?.getBoundingClientRect().bottom ?? view.top);
+	const box = row.getBoundingClientRect();
+	const by = where === 'center'
+		? (box.top + box.bottom - top - view.bottom) / 2
+		: box.top < top ? box.top - top : Math.max(0, box.bottom - view.bottom);
+	if (Math.abs(by) >= 1)
+		(scroller ?? window).scrollBy({ top: by, behavior: smooth ? 'smooth' : 'instant' });
 }
 
 /**
@@ -758,16 +794,39 @@ const matchRows = computed(() => {
 		.map((row) => String(row[rowKey]));
 });
 const matchAt = ref<string | null>(null);
-function goToMatch(step: 1 | -1 = 1) {
-	const rows = matchRows.value;
+/**
+ * What ↓, ↑ and Enter in the search go through: the matches, or with nothing to match, the rows
+ * showing. That includes a flat list searched, as Directus has already left only the matches.
+ */
+const matching = () => !!(props.matches ?? props.keep);
+const steppable = () => (matching() ? matchRows.value : visibleRows().map((row) => String(row[rowKey])));
+/** `start`: from the first, whichever was last gone to. `arrow`: by ↓ or ↑, a step rather than a find */
+function goToMatch(step: 1 | -1 = 1, how: { start?: boolean; arrow?: boolean } = {}) {
+	const rows = steppable();
 	if (!rows.length)
 		return;
-	const at = matchAt.value === null ? -1 : rows.indexOf(matchAt.value);
+	// From the match last gone to, as a browser's find goes, or the selected row
+	const shown = keyed.value || props.clickSelects ? cursor.value : null;
+	const last = how.start ? null : matching() ? matchAt.value ?? shown : cursor.value;
+	const at = last === null ? -1 : rows.indexOf(last);
 	const next = at < 0 ? (step > 0 ? 0 : rows.length - 1) : (at + step + rows.length) % rows.length;
-	matchAt.value = rows[next]!;
-	cursor.value = rows[next]!;
+	const key = rows[next]!;
+	matchAt.value = key;
+	cursor.value = key;
 	keyed.value = true;
-	void goTo(rows[next]!);
+	if (matching()) {
+		// Where only the matches show, and the way to them, the next is the next highlighted row down:
+		// stepped to, it needs no pulse to be found. Marked among the rest, it might be anywhere.
+		const onlyMatches = !!searchRoutes.value || (!!keepKeys.value && !props.matches);
+		void goTo(key, !!how.arrow && onlyMatches);
+		return;
+	}
+	// Row by row, like the arrow keys: a pulse and a scroll to the middle for each would be a lot
+	void nextTick(() => {
+		const row = rowElement(key);
+		if (row)
+			revealRow(row, 'nearest');
+	});
 }
 watch([() => props.matches, () => props.keep], ([matches, keep], [hadMatches, hadKeep]) => {
 	const last = matchAt.value;
@@ -792,13 +851,51 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
 	if (event.key === 'Escape' && cursor.value !== null && !typing(event.target) && !escapeTaken?.())
 		cursor.value = null;
 }, { capture: true });
-/** A picker's ⌘Enter: ticks the selected row, if it shows and isn't ticked yet; false with none showing */
+/** The row Enter or Space last ticked or unticked, while the cursor stays on it */
+let toggledHere: string | null = null;
+function toggleRow(row: Item, value: boolean) {
+	toggledHere = String(row[rowKey]);
+	onItemSelected({ item: row, value });
+}
+
+/**
+ * A picker's Enter in the search: ticks or unticks the selected row, if it's one of the matches
+ * (choosing the one item a picker takes is never undone). Off them, it goes to the first, and
+ * ticks it as well when it's the only item there is to pick.
+ */
+function pickMatch(): 'ticked' | 'unticked' | 'went' | null {
+	const rows = steppable();
+	if (!rows.length || props.showSelect === 'none')
+		return null;
+	if (cursor.value === null || !keyed.value || !rows.includes(cursor.value)) {
+		goToMatch(1, { start: true });
+		// An item in several places is still one
+		if (new Set(rows.map((key) => rowsByKey.value.get(key)?.[props.itemKey])).size > 1)
+			return 'went';
+	}
+	const row = cursorRow.value;
+	if (!row)
+		return null;
+	const ticked = getSelectedState(row);
+	if (ticked && props.showSelect === 'one')
+		return 'ticked';
+	toggleRow(row, !ticked);
+	return ticked ? 'unticked' : 'ticked';
+}
+
+/**
+ * A picker's ⌘Enter: ticks the selected row, if it shows and isn't ticked yet, unless Enter or
+ * Space has just unticked it. Whether it's ticked now.
+ */
 function pickCursor() {
 	const row = cursorRow.value;
 	if (!row || !(keyed.value || props.clickSelects) || props.showSelect === 'none')
 		return false;
-	if (!getSelectedState(row))
-		onItemSelected({ item: row, value: true });
+	if (getSelectedState(row))
+		return true;
+	if (toggledHere === cursor.value)
+		return false;
+	onItemSelected({ item: row, value: true });
 	return true;
 }
 
@@ -818,66 +915,98 @@ function focusTable() {
 	keyed.value = true;
 	tableEl.value?.focus({ preventScroll: true });
 }
-defineExpose({ goToMatch, focusTable, pickCursor, unfoldCursor });
+defineExpose({ goToMatch, focusTable, pickMatch, pickCursor, unfoldCursor });
 
 /**
  * Rows over a screen away are far, and drawn without their cells: unfolding a big tree builds a few
  * elements a row rather than every cell, and restyling the page, as Directus does whenever its
  * sidebar moves, doesn't restyle hundreds of rows no one can see. `content-visibility` would keep
- * them findable, but Gecko restyles what it skips; and on every row, rows scrolling into view were
- * drawn a moment late, visibly. A row starts far, and is measured as soon as it's in the page,
- * before anything's painted, so the rows in view never show empty; then the observer keeps it up.
+ * them findable, but Gecko restyles what it skips.
+ *
+ * Every row is the same height, so the rows near are a range of places among the rows showing, and
+ * nothing is measured per row: measured, a row folded away sat at no height inside the screen, so
+ * Fold all drew the cells of every row it hid, and an unfold every row it opened, bunched where
+ * they start growing from. The rows in view are drawn at once, and the rest of a screen each way a
+ * few rows a frame, as a row of Directus's displays takes milliseconds: a screen of them at once
+ * held up the frame after the table showed, or after a fold. A row drawn stays so until it's two
+ * screens away, so scrolling back and forth doesn't draw it again and again.
  */
-let farRows: IntersectionObserver | undefined;
+const reach = shallowRef({ from: 0, to: -1, slack: 0 });
+/** The rows in view when last measured, by place, from which the rest grow */
+let inView: { from: number; to: number } | null = null;
+/** Rows added each way a frame */
+const growth = 8;
 /** What scrolls the table: from the window, that scroller's edge would cut the margin off */
 let scroller: HTMLElement | null = null;
-const farOf = new WeakMap<Element, Ref<boolean>>();
-let measuring: Map<Element, Ref<boolean>> | null = null;
-function measureRows() {
-	const rows = measuring!;
-	measuring = null;
+let reachFrame = 0;
+function measureReach() {
+	cancelAnimationFrame(reachFrame);
+	reachFrame = 0;
+	// The first row's top is where the rows start, even folded away: it's there at no height
+	const first = tableEl.value?.querySelector('tbody > .table-row');
+	if (!first)
+		return;
 	const view = scroller?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight };
-	// As the observer's margin: a screen above and below
-	const reach = view.bottom - view.top;
-	for (const [row, far] of rows) {
-		if (!row.isConnected)
-			continue;
-		const { top, bottom } = row.getBoundingClientRect();
-		// Without an observer to bring it back, never
-		far.value = !!farRows && (bottom < view.top - reach || top > view.bottom + reach);
-		farRows?.observe(row);
-	}
+	const top = first.getBoundingClientRect().top;
+	const stride = props.rowHeight + 2;
+	const slack = Math.ceil((view.bottom - view.top) / stride);
+	const last = shownIndex.value.size - 1;
+	const fresh = !inView;
+	inView = { from: Math.max(0, Math.floor((view.top - top) / stride)), to: Math.min(last, Math.ceil((view.bottom - top) / stride)) };
+	const want = { from: Math.max(0, inView.from - slack), to: Math.min(last, inView.to + slack) };
+	const was = reach.value;
+	// From what's drawn while it meets the view; scrolled well away, from the view
+	const base = !fresh && was.from <= inView.to + 1 && was.to >= inView.from - 1
+		? { from: Math.min(was.from, inView.from), to: Math.max(was.to, inView.to) }
+		: inView;
+	const step = fresh ? 0 : growth;
+	const from = Math.max(want.from, base.from - step);
+	const to = Math.min(want.to, base.to + step);
+	if (from !== was.from || to !== was.to || slack !== was.slack)
+		reach.value = { from, to, slack };
+	if (from > want.from || to < want.to)
+		reachFrame = requestAnimationFrame(measureReach);
 }
-provide('table-rows', {
-	added: (row: Element, far: Ref<boolean>) => {
-		farOf.set(row, far);
-		if (!measuring) {
-			measuring = new Map();
-			// Once every row this redraw adds is in, in one go: one layout, however many there are
-			void nextTick(measureRows);
-		}
-		measuring.set(row, far);
-	},
-	removed: (row: Element) => farRows?.unobserve(row),
+function measureReachSoon() {
+	reachFrame ||= requestAnimationFrame(measureReach);
+}
+// Before the rows redraw: the places drawn now hold other rows, so only the view is drawn at once
+watch(shownIndex, () => {
+	if (!inView)
+		return;
+	reach.value = { ...inView, slack: reach.value.slack };
+	measureReachSoon();
 });
+function isFar(key: string, was = true) {
+	const at = shownIndex.value.get(key);
+	if (at === undefined)
+		return folding.value.has(key) ? was : true;
+	const { from, to, slack } = reach.value;
+	return was ? at < from || at > to : at < from - slack || at > to + slack;
+}
+provide('row-far', isFar);
+let resized: ResizeObserver | undefined;
 onMounted(() => {
 	scroller = tableRoot.value?.parentElement ?? null;
 	while (scroller && !/auto|scroll|overlay/.test(getComputedStyle(scroller).overflowY))
 		scroller = scroller.parentElement;
-	if (typeof IntersectionObserver === 'undefined')
-		return;
-	farRows = new IntersectionObserver(
-		(entries) => {
-			for (const entry of entries) {
-				const far = farOf.get(entry.target);
-				if (far)
-					far.value = !entry.isIntersecting;
-			}
-		},
-		{ root: scroller, rootMargin: '100% 0px' },
-	);
+	(scroller ?? window).addEventListener('scroll', measureReachSoon, { passive: true });
+	// The table, as its wrapper may have no box: it resizes as rows arrive, fold or open. Measured
+	// straight away, as layout's just been done, so the rows in view are drawn before it's painted.
+	resized = new ResizeObserver(() => measureReach());
+	if (tableEl.value)
+		resized.observe(tableEl.value);
+	if (scroller)
+		resized.observe(scroller);
+	else window.addEventListener('resize', measureReachSoon);
 });
-onBeforeUnmount(() => farRows?.disconnect());
+onBeforeUnmount(() => {
+	resized?.disconnect();
+	(scroller ?? window).removeEventListener('scroll', measureReachSoon);
+	window.removeEventListener('resize', measureReachSoon);
+	cancelAnimationFrame(reachFrame);
+	clearTimeout(foldPlayed);
+});
 
 /** A hint was clicked: each does what its words promise rather than open the item */
 function onHintClick(item: Item, kind: 'home' | 'loop' | 'count' | 'matches') {
@@ -919,6 +1048,10 @@ const tableEl = ref<HTMLTableElement>();
 const keyed = ref(false);
 const cursorRow = computed(() => (cursor.value === null ? null : rowsByKey.value.get(cursor.value) ?? null));
 watch(cursorRow, (row) => emit('cursor', row));
+watch(cursor, (key) => {
+	if (key !== toggledHere)
+		toggledHere = null;
+});
 // Gone in a reload or a move: nothing selected rather than a row that isn't there
 watch(rowsByKey, (rows) => {
 	if (cursor.value !== null && !rows.has(cursor.value))
@@ -1003,7 +1136,7 @@ function onTableKey(event: KeyboardEvent) {
 			break;
 		case ' ':
 			if (item && props.showSelect !== 'none')
-				onItemSelected({ item, value: !getSelectedState(item) });
+				toggleRow(item, !getSelectedState(item));
 			break;
 		default:
 			return;
@@ -1012,10 +1145,12 @@ function onTableKey(event: KeyboardEvent) {
 	keyed.value = true;
 	if (!next)
 		return;
-	cursor.value = String(next[rowKey]);
-	void nextTick(() =>
-		tableRoot.value?.querySelector(`.table-row[data-key="${cursor.value!.replace(/["\\]/g, '\\$&')}"]`)?.scrollIntoView({ block: 'nearest' }),
-	);
+	const key = (cursor.value = String(next[rowKey]));
+	void nextTick(() => {
+		const row = rowElement(key);
+		if (row)
+			revealRow(row, 'nearest');
+	});
 }
 
 
@@ -1370,8 +1505,11 @@ function useTreeView({
 
 	function initTreeView() {
 		if (!treeViewAble.value) {
-			// Flat, every item is one row, keyed by its own key
-			internalItems.value = props.items.map((item) => ({ ...item, [rowKey]: String(item[itemKey.value]) }));
+			// Flat, every item is one row, keyed by its own key, and its own node, which is what matches
+			internalItems.value = props.items.map((item) => {
+				const key = String(item[itemKey.value]);
+				return { ...item, [rowKey]: key, '--node': key };
+			});
 			return;
 		}
 		internalItems.value = placementRows();
@@ -1929,7 +2067,7 @@ table.animate-folds :deep(.table-row) {
 	/* Unfolding drops the folded row's own clip at once, so it would spill over the rows below. The
 	   top is left open for the tree guides' corners, which reach up into the row above, and the
 	   bottom by a border for the last row's curve onto the table's border. */
-	clip-path: inset(-6px 0 calc(-1 * var(--theme--border-width)) 0);
+	clip-path: inset(-6px 0 calc(-1 * var(--theme--border-width)) min(0px, var(--ring-start, 0px)));
 	transition:
 		height 150ms cubic-bezier(0.2, 0, 0, 1),
 		opacity 150ms ease-out,
@@ -1966,11 +2104,13 @@ table.tree-view:focus-visible {
 	position: relative;
 }
 
+/* `--ring-start`: where the ring starts, which can be out in a gutter the page leaves to the left
+   (see the Directus layout), so it clears a handle or checkbox at the row's very start */
 .v-table.click-selects :deep(.table-row.cursor)::after,
 .v-table.keyed :deep(.table-row.cursor)::after {
 	content: '';
 	position: absolute;
-	inset: 1px 2px;
+	inset: 1px 2px 1px var(--ring-start, 2px);
 	border: 2px solid var(--theme--primary);
 	border-radius: var(--theme--border-radius);
 	pointer-events: none;
@@ -1985,7 +2125,7 @@ table.tree-view:focus-visible {
 .v-table.alt-held:not(.click-selects) :deep(.table-row:not(.cursor):hover:not(:has(.collapse-btn:hover, .drag-handle:hover)))::after {
 	content: '';
 	position: absolute;
-	inset: 1px 2px;
+	inset: 1px 2px 1px var(--ring-start, 2px);
 	border: 2px solid var(--theme--primary);
 	border-radius: var(--theme--border-radius);
 	opacity: 0.45;

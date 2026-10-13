@@ -84,12 +84,14 @@ interface Props {
 	selectAll: () => void;
 	filterUser?: Filter;
 	search?: string;
+	/** The search the matches, or a flat list's rows, are for: Enter in the search waits for them */
+	searchedFor: string | null;
 	aliasedFields: Record<string, AliasFields>;
 	aliasedKeys: string[];
 	onSortChange: (newSort: { by: string; desc: boolean }) => void;
 	onAlignChange?: (field: 'string', align: 'left' | 'center' | 'right') => void;
 	parentField: string | null;
-	hierarchy: 'taxonomy' | 'polyhierarchy';
+	hierarchy: 'taxonomy' | 'polyhierarchy' | 'flat';
 	junction: string | null;
 	/** The hierarchy, built by the layout's setup from the parent field or the junction's links */
 	graph: Graph | null;
@@ -112,6 +114,8 @@ interface Props {
 	treeActive: boolean;
 	/** The column the hierarchy indents, by key; `$controls` for none */
 	treeColumn: string;
+	/** Several options in one write, from the layout's setup */
+	setLayoutOptions: (changes: Record<string, unknown>) => void;
 	showGuides: boolean;
 	openDepth: number | null;
 	maxOpenDepth: number | null;
@@ -222,7 +226,13 @@ const limitWritable = useSync(props, 'limit', emit);
 
 const mainElement = inject<Ref<Element | undefined>>('main-element');
 
-const table = ref<ComponentPublicInstance & { goToMatch?: (step: 1 | -1) => void; focusTable?: () => void; pickCursor?: () => boolean; unfoldCursor?: () => void }>();
+const table = ref<ComponentPublicInstance & {
+	goToMatch?: (step: 1 | -1, how?: { arrow?: boolean }) => void;
+	focusTable?: () => void;
+	pickMatch?: () => 'ticked' | 'unticked' | 'went' | null;
+	pickCursor?: () => boolean;
+	unfoldCursor?: () => void;
+}>();
 
 /** Picking more parents or children for the selected row, or a taxonomy's new parent, in Directus's own drawer */
 const picking = ref<'parent' | 'child' | 'reparent' | null>(null);
@@ -278,21 +288,37 @@ async function focusSearch(box: HTMLElement) {
 	input.select();
 }
 
+/** The drawer's Save, while picking items */
+const saveButton = () => layoutRoot.value?.closest('.v-drawer')?.querySelector<HTMLElement>('.header-bar .header-button:not(.close-button) button') ?? null;
+
 /**
- * Enter in the search goes to the next match (Shift+Enter, the one before) and selects it; Esc then
- * leaves the search for the table, where the arrow keys carry on from it. ⌘/Ctrl-F focuses the
- * search, as the browser's find can't see the rows drawn without their cells; pressed again from the
- * search, it's the browser's. Picking items, ⌘/Ctrl+Enter takes the selected row and saves.
+ * ↓ and ↑ in the search go to the next and the one before, match or (with nothing searched) row, and
+ * select it; so does Enter (Shift+Enter, back) in a collection's page. Picking items, Enter instead
+ * ticks the match selected (see the table's `pickMatch`), so typing a name and Enter picks it, and
+ * then the search's text is selected for the next one. Esc leaves the search for the table, where
+ * the arrow keys carry on. ⌘/Ctrl-F focuses the search, as the browser's find can't see the rows
+ * drawn without their cells; pressed again from the search, it's the browser's. Picking items,
+ * ⌘/Ctrl+Enter takes the selected row and saves.
  */
-let pendingStep: 1 | -1 | null = null;
+type SearchKey = { step: 1 | -1; arrow?: boolean } | 'pick';
+let pending: SearchKey | null = null;
 let pendingGiveUp: ReturnType<typeof setTimeout> | undefined;
+function searchKey(key: SearchKey, input: HTMLInputElement) {
+	if (key !== 'pick') {
+		table.value?.goToMatch?.(key.step, { arrow: key.arrow });
+		return;
+	}
+	const done = table.value?.pickMatch?.();
+	if (props.showSelect === 'multiple' && (done === 'ticked' || done === 'unticked'))
+		input.select();
+}
 function onKeydown(event: KeyboardEvent) {
 	const box = ownSearch();
 	const input = box?.querySelector('input');
-	if (!box || !input)
+	if (!box || !input || event.isComposing)
 		return;
-	if (props.selectMode && event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.isComposing) {
-		const save = layoutRoot.value?.closest('.v-drawer')?.querySelector<HTMLElement>('.header-bar .header-button:not(.close-button) button');
+	if (props.selectMode && event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+		const save = saveButton();
 		if (!save)
 			return;
 		event.preventDefault();
@@ -302,18 +328,29 @@ function onKeydown(event: KeyboardEvent) {
 			void nextTick(() => save.click());
 		return;
 	}
-	// With nothing in the search there's nothing to go to: Enter is left alone
-	if (event.key === 'Enter' && event.target === input && !event.isComposing && input.value.trim()) {
+	const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : null;
+	const key: SearchKey | null = event.target !== input || event.metaKey || event.ctrlKey || event.altKey
+		? null
+		: step
+			? { step, arrow: true }
+			: event.key !== 'Enter'
+				? null
+				: props.selectMode
+					? 'pick'
+					// With nothing in the search there's nothing to go to: Enter is left alone
+					: input.value.trim()
+						? { step: event.shiftKey ? -1 : 1 }
+						: null;
+	if (key) {
 		event.preventDefault();
-		const step = event.shiftKey ? -1 : 1;
-		// Typed faster than the search follows: go once its matches arrive
-		if (input.value.trim() !== (props.search ?? '').trim()) {
-			pendingStep = step;
+		// Typed faster than the search follows: once its matches (or a flat list's rows) arrive
+		if (input.value.trim() !== (props.searchedFor ?? '').trim()) {
+			pending = key;
 			clearTimeout(pendingGiveUp);
-			pendingGiveUp = setTimeout(() => (pendingStep = null), 3000);
+			pendingGiveUp = setTimeout(() => (pending = null), 3000);
 		}
 		else {
-			table.value?.goToMatch?.(step);
+			searchKey(key, input);
 		}
 	}
 	else if (event.key === 'Escape' && event.target === input && table.value?.focusTable) {
@@ -331,14 +368,21 @@ function onKeydown(event: KeyboardEvent) {
 		void focusSearch(box);
 	}
 }
-watch([() => props.matches, () => props.keep], async () => {
-	if (pendingStep === null)
+watch(() => props.searchedFor, async (searched) => {
+	const input = ownSearch()?.querySelector('input');
+	if (!pending || !input || input.value.trim() !== (searched ?? '').trim())
 		return;
-	const step = pendingStep;
-	pendingStep = null;
+	const key = pending;
+	pending = null;
+	// Once the table has the rows
 	await nextTick();
-	table.value?.goToMatch?.(step);
+	searchKey(key, input);
 });
+
+/** Where the drawer's Save says its shortcut, drawn into Directus's own button */
+const saveLabel = ref<HTMLElement | null>(null);
+const saveKeys = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘↵' : 'Ctrl+↵';
+const findSaveLabel = () => (saveLabel.value ||= props.selectMode ? saveButton()?.querySelector<HTMLElement>('.content') ?? null : null);
 
 onMounted(() => {
 	// Capturing on the window, before anything on the way down can keep the key to itself
@@ -348,7 +392,9 @@ onMounted(() => {
 	// search was for something else
 	if (layoutRoot.value?.closest('.v-drawer')) {
 		ownSearch()?.querySelector<HTMLElement>('.icon-clear')?.click();
+		findSaveLabel();
 		setTimeout(() => {
+			findSaveLabel();
 			const box = ownSearch();
 			if (box)
 				void focusSearch(box);
@@ -405,6 +451,12 @@ function removeField(fieldKey: string) {
 		ref="layoutRoot"
 		class="custom-layout"
 	>
+		<Teleport
+			v-if="saveLabel"
+			:to="saveLabel"
+		>
+			<span class="save-keys">{{ saveKeys }}</span>
+		</Teleport>
 		<v-notice
 			v-if="linksError"
 			class="hierarchy-hint"
@@ -618,6 +670,36 @@ function removeField(fieldKey: string) {
 						</v-list-item-content>
 					</v-list-item>
 
+					<template v-if="treeActive">
+						<v-divider />
+
+						<!-- Already indenting up to it: the way back to none, where only the controls indent -->
+						<v-list-item
+							v-if="treeColumn === header.value"
+							clickable
+							@click="setLayoutOptions({ treeColumn: '$controls' })"
+						>
+							<v-list-item-icon>
+								<v-icon name="format_indent_decrease" />
+							</v-list-item-icon>
+							<v-list-item-content>
+								Indent only the controls
+							</v-list-item-content>
+						</v-list-item>
+						<v-list-item
+							v-else
+							clickable
+							@click="setLayoutOptions({ treeColumn: header.value })"
+						>
+							<v-list-item-icon>
+								<v-icon name="format_indent_increase" />
+							</v-list-item-icon>
+							<v-list-item-content>
+								Indent up to this column
+							</v-list-item-content>
+						</v-list-item>
+					</template>
+
 					<v-divider />
 
 					<v-list-item
@@ -726,6 +808,11 @@ function removeField(fieldKey: string) {
 	margin-bottom: var(--content-padding-bottom);
 }
 
+.save-keys {
+	margin-inline-start: 6px;
+	opacity: 0.6;
+}
+
 .hierarchy-hint {
 	/* The table's own edges (see `table.has-controls` below): it starts a chevron's width into the
 	   gutter, so a notice inset by the gutter both sides started further in and ran past its end */
@@ -759,6 +846,9 @@ function removeField(fieldKey: string) {
 	   than the edge, where the gutter is narrower than a chevron. */
 	& > :deep(table.has-controls) {
 		margin-inline-start: max(0px, calc(var(--content-padding) - 28px));
+		/* The selected row's ring reaches into that gutter, where there's room, to clear the handle
+		   or checkbox at the row's start */
+		--ring-start: calc(-1 * min(6px, max(0px, calc(var(--content-padding) - 28px))));
 	}
 }
 

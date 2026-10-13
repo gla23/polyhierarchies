@@ -70,6 +70,10 @@ A few traps found the hard way, each also commented where it bit:
   in a CSS variable on the element around everything, so every descendant restyles. That's why rows
   far off screen are drawn without their cells: `content-visibility` would keep them findable, but
   Gecko restyles what it skips.
+- **A row of Directus's displays takes milliseconds to draw.** Its Colour display (also inside
+  dynamic labels) reads a CSS variable with `getComputedStyle` as it mounts, a style recalculation
+  each, and uses `v-bind()` in its CSS. So the table draws only the rows in view at once and the
+  rest a few a frame, and a row folded away loses its cells once its fold has played.
 - **A Directus layout's wrapper is `display: contents`**, which can't take focus, so the table
   focuses its `<table>` for the keyboard. Directus's menus are too, which takes no opacity, so a
   dimmed row dims what's inside a display's menu instead.
@@ -80,3 +84,6 @@ A few traps found the hard way, each also commented where it bit:
 - **Firefox sometimes gets a Directus response without data**, after which Directus leaves its
   items undefined (and logs its own TypeError from `useItems().getTotalCount`). The layout treats
   missing items as none.
+- **`scrollIntoView` scrolls sideways too**: a row wider than what scrolls it (Directus's sidebar
+  open) has its start lined up with the edge, so going to a match slid the whole table left. Nor
+  does it know about the sticky header. The table scrolls a row into view up and down only.

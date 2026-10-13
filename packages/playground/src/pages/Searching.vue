@@ -121,7 +121,7 @@ const placements = [
 
 		<h2>How deep a search opens</h2>
 		<p>
-			Every level indents the tree column a little further, and the columns after it stay in line by
+			Every level moves the indented column a little further right, and the columns after it stay in line by
 			giving up that width, so a route thirty levels deep pushes them off screen. So the routes, and
 			Unfold all, stop at "Levels opened at most" (five, unless a view says otherwise). A row at the limit
 			says "2 matches below", and clicking it opens the way on, as deep as it goes. Anything aimed at

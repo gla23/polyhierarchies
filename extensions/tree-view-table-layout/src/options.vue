@@ -17,7 +17,7 @@ interface Props {
 	fields: string[];
 	activeFields: Field[];
 	tableSpacing: 'compact' | 'cozy' | 'comfortable';
-	hierarchy: 'taxonomy' | 'polyhierarchy';
+	hierarchy: 'taxonomy' | 'polyhierarchy' | 'flat';
 	parentField: string | null;
 	junction: string | null;
 	junctionParent: string | null;
@@ -73,16 +73,33 @@ const treeColumnWritable = useSync(props, 'treeColumn', emit);
 const searchModeWritable = useSync(props, 'searchMode', emit);
 const filterModeWritable = useSync(props, 'filterMode', emit);
 const modeMenusWritable = useSync(props, 'modeMenus', emit);
-const searchModeItems = [
-	{ text: 'Show the routes to the matches', value: 'routes' },
-	{ text: 'Keep my folds, mark the matches', value: 'inplace' },
-];
-const modeItems = [
-	{ text: 'Hide what doesn’t match', value: 'hide' },
-	{ text: 'Show the routes to the matches', value: 'routes' },
-	{ text: 'Keep my folds, mark the matches', value: 'inplace' },
-	{ text: 'Off: set aside, not cleared', value: 'off' },
-];
+// Flat, there are no routes or folds: a search shows only its matches or marks them among the rest
+const searchModeItems = computed(() => (ready.value
+	? [
+			{ text: 'Show the routes to the matches', value: 'routes' },
+			{ text: 'Keep my folds, mark the matches', value: 'inplace' },
+		]
+	: [
+			{ text: 'Show only the matches', value: 'routes' },
+			{ text: 'Show everything, mark the matches', value: 'inplace' },
+		]));
+const modeItems = computed(() => (ready.value
+	? [
+			{ text: 'Hide what doesn’t match', value: 'hide' },
+			{ text: 'Show the routes to the matches', value: 'routes' },
+			{ text: 'Keep my folds, mark the matches', value: 'inplace' },
+			{ text: 'Off: set aside, not cleared', value: 'off' },
+		]
+	: [
+			{ text: 'Hide what doesn’t match', value: 'hide' },
+			{ text: 'Show everything, mark the matches', value: 'inplace' },
+			{ text: 'Off: set aside, not cleared', value: 'off' },
+		]));
+/** Flat, showing the routes hides what doesn't match, as hiding does */
+const filterModeShown = computed({
+	get: () => (!ready.value && props.filterMode === 'routes' ? 'hide' : props.filterMode),
+	set: (value: LayerMode) => (filterModeWritable.value = value),
+});
 const showGuidesWritable = useSync(props, 'showGuides', emit);
 const openDepthWritable = useSync(props, 'openDepth', emit);
 const maxOpenDepthWritable = useSync(props, 'maxOpenDepth', emit);
@@ -97,8 +114,9 @@ const maxOpenDepthItems = [
 ];
 
 const hierarchyItems = [
-	{ text: 'Taxonomy: one parent each', value: 'taxonomy' },
-	{ text: 'Polyhierarchy: any number of parents', value: 'polyhierarchy' },
+    { text: 'Polyhierarchy: Any number of parents', value: 'polyhierarchy' },
+	{ text: 'Taxonomy: One parent each', value: 'taxonomy' },
+	{ text: 'Flat: Standard table with upgrades', value: 'flat' },
 ];
 
 // Two when unset, as the layout's setup has it; -1 opens everything
@@ -202,13 +220,14 @@ const ready = computed(() =>
 		? !!(props.junction && props.junctionParent && props.junctionChild)
 		: !!props.parentField,
 );
+
 </script>
 
 <template>
+	<!-- Folded to start, so a hierarchy chosen but not set up, which shows flat, says so from outside -->
 	<v-detail
-		label="Hierarchy"
+		:label="ready || hierarchy === 'flat' ? 'Hierarchy' : '⚠️ Hierarchy'"
 		class="section"
-		:start-open="!ready"
 	>
 		<div class="field">
 			<div class="type-label">
@@ -218,10 +237,14 @@ const ready = computed(() =>
 				v-model="hierarchyWritable"
 				:items="hierarchyItems"
 			/>
+			<small
+				v-if="hierarchy === 'flat'"
+				class="type-note"
+			>The items show as a flat list, nothing nested. {{ keys.inside }}+F goes to the search, where ↓ and ↑ go through the rows and Esc goes into the table. Picking items, Enter picks the one you're on and {{ keys.inside }}+Enter saves.</small>
 		</div>
 
 		<div
-			v-if="hierarchy !== 'polyhierarchy'"
+			v-if="hierarchy === 'taxonomy'"
 			class="field"
 		>
 			<div class="type-label">
@@ -276,7 +299,7 @@ const ready = computed(() =>
 			</template>
 		</div>
 
-		<template v-else>
+		<template v-else-if="hierarchy === 'polyhierarchy'">
 			<div class="field">
 				<div class="type-label">
 					Links (junction)
@@ -287,8 +310,8 @@ const ready = computed(() =>
 					class="setup"
 				>
 					<div>
-						<p>A polyhierarchy keeps its links in a junction collection: one row per parent → child link, with two many-to-one fields that both point at this collection.</p>
-						<p>Create one in the data model settings (a many-to-many from this collection to itself makes one), then choose it here.</p>
+						<p>A polyhierarchy keeps its links in a junction collection. Each row is a parent-to-child link with two foreign keys pointing at this collection.</p>
+						<p>To use this layout create a many-to-many from this collection to itself, then choose it here.</p>
 					</div>
 				</v-notice>
 				<template v-else>
@@ -351,57 +374,58 @@ const ready = computed(() =>
 		</template>
 	</v-detail>
 
-	<template v-if="ready">
-		<v-detail
-			label="Display"
-			class="section"
-			start-open
+	<v-detail
+		label="Display"
+		class="section"
+	>
+		<div class="field">
+			<div class="type-label">
+				{{ t("layouts.tabular.spacing") }}
+			</div>
+			<v-select
+				v-model="tableSpacingWritable"
+				:items="[
+					{
+						text: t('layouts.tabular.compact'),
+						value: 'compact',
+					},
+					{
+						text: t('layouts.tabular.cozy'),
+						value: 'cozy',
+					},
+					{
+						text: t('layouts.tabular.comfortable'),
+						value: 'comfortable',
+					},
+				]"
+			/>
+		</div>
+
+		<div
+			v-if="ready"
+			class="field"
 		>
-			<div class="field">
-				<div class="type-label">
-					{{ t("layouts.tabular.spacing") }}
-				</div>
-				<v-select
-					v-model="tableSpacingWritable"
-					:items="[
-						{
-							text: t('layouts.tabular.compact'),
-							value: 'compact',
-						},
-						{
-							text: t('layouts.tabular.cozy'),
-							value: 'cozy',
-						},
-						{
-							text: t('layouts.tabular.comfortable'),
-							value: 'comfortable',
-						},
-					]"
-				/>
+			<div class="type-label">
+				Indent up to
 			</div>
+			<v-select
+				v-model="treeColumnWritable"
+				:items="treeColumnItems"
+			/>
+			<small class="type-note">This column, and every column before it, moves right with each level, so the columns after it stay in line. Hints such as “12 below” appear in it. A column's own menu can choose it too: Indent up to this column.</small>
+			<v-checkbox
+				v-model="showGuidesWritable"
+				block
+				label="Lines down each open item"
+				class="checkbox"
+			/>
+		</div>
+	</v-detail>
 
-			<div class="field">
-				<div class="type-label">
-					Tree column
-				</div>
-				<v-select
-					v-model="treeColumnWritable"
-					:items="treeColumnItems"
-				/>
-				<small class="type-note">This column, and every column before it, moves right with each level, so the columns after it stay in line. Hints such as “12 below” appear in it.</small>
-				<v-checkbox
-					v-model="showGuidesWritable"
-					block
-					label="Lines down each open item"
-					class="checkbox"
-				/>
-			</div>
-		</v-detail>
-
+	<template v-if="ready">
 		<v-detail
 			label="Folding"
 			class="section"
-			start-open
 		>
 			<div class="field">
 				<div class="type-label">
@@ -434,48 +458,53 @@ const ready = computed(() =>
 				<small class="type-note">{{ keys.inside }}-click a chevron to fold or unfold everything inside it, and {{ keys.siblings }}-click to include its siblings.<template v-if="hierarchy === 'polyhierarchy'"> Hold {{ keys.siblings }} as you drop a dragged row to add a parent rather than move it.</template></small>
 			</div>
 		</v-detail>
-
-		<v-detail
-			label="Search and filters"
-			class="section"
-			start-open
-		>
-			<div class="field">
-				<div class="type-label">
-					Search
-				</div>
-				<v-select v-model="searchModeWritable" :items="searchModeItems" />
-				<div class="type-label search-label">
-					Filters
-				</div>
-				<v-select v-model="filterModeWritable" :items="modeItems" />
-				<v-checkbox
-					v-model="modeMenusWritable"
-					block
-					label="Filter menu in the top bar while filtering"
-					class="checkbox"
-				/>
-				<small class="type-note">A search either opens every way to its matches, hiding the rest, or marks them where they are and keeps your folds; in both, Enter in the search goes to the next match. A filter can do either too, hide what doesn't match while keeping your folds, or be turned off without clearing it.</small>
-			</div>
-		</v-detail>
-
-		<v-detail
-			label="Clicking"
-			class="section"
-			start-open
-		>
-			<div class="field">
-				<div class="type-label">
-					Clicking a row
-				</div>
-				<v-select
-					v-model="rowClickWritable"
-					:items="rowClickItems"
-				/>
-				<small class="type-note">Opens it is Directus's usual behaviour, and {{ keys.siblings }}-click selects a row instead (hold {{ keys.siblings }} to see which). Selects it makes a click select the row, and a double-click opens the item. A selected row's actions follow its name: <template v-if="hierarchy === 'polyhierarchy'">add parents or children, or unlink it from the parent it's under</template><template v-else>reparent it</template>, and open it when a click selects. Either way, the arrow keys move through the rows and Enter opens one.</small>
-			</div>
-		</v-detail>
 	</template>
+
+	<v-detail
+		label="Search and filters"
+		class="section"
+	>
+		<div class="field">
+			<div class="type-label">
+				Search
+			</div>
+			<v-select v-model="searchModeWritable" :items="searchModeItems" />
+			<div class="type-label search-label">
+				Filters
+			</div>
+			<v-select v-model="filterModeShown" :items="modeItems" />
+			<v-checkbox
+				v-model="modeMenusWritable"
+				block
+				label="Filter menu in the top bar while filtering"
+				class="checkbox"
+			/>
+			<small
+				v-if="ready"
+				class="type-note"
+			>A search either opens every way to its matches, hiding the rest, or marks them where they are and keeps your folds; in both, ↓ and ↑ in the search go to the next match and the one before, as Enter and Shift+Enter do (picking items, Enter picks the match you're on). A filter can do either too, hide what doesn't match while keeping your folds, or be turned off without clearing it.</small>
+			<small
+				v-else
+				class="type-note"
+			>A search either shows only its matches, as Directus's own does, or shows everything and marks them; in both, ↓ and ↑ in the search go to the next match and the one before, as Enter and Shift+Enter do (picking items, Enter picks the match you're on). A filter can do either too, or be turned off without clearing it.</small>
+		</div>
+	</v-detail>
+
+	<v-detail
+		label="Extras"
+		class="section"
+	>
+		<div class="field">
+			<div class="type-label">
+				Clicking a row
+			</div>
+			<v-select
+				v-model="rowClickWritable"
+				:items="rowClickItems"
+			/>
+			<small class="type-note">Opens it is Directus's usual behaviour, and {{ keys.siblings }}-click selects a row instead (hold {{ keys.siblings }} to see which). Selects it makes a click select the row, and a double-click opens the item. A selected row's actions follow its name: <template v-if="ready && hierarchy === 'polyhierarchy'">add parents or children, or unlink it from the parent it's under, and </template><template v-else-if="ready">reparent it, and </template>open it when a click selects. Either way, the arrow keys move through the rows and Enter opens one.</small>
+		</div>
+	</v-detail>
 
 	<a
 		class="about"

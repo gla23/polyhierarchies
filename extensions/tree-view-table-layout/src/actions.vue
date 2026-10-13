@@ -25,16 +25,25 @@ const props = defineProps<{
 }>();
 
 /** What a filter does to the tree, each in a line, as the menu shows them */
-const modes = [
-	{ value: 'hide', text: 'Hide', description: 'What doesn’t match isn’t shown. Nothing is highlighted, and your folds stay.' },
+const treeModes = [
+	{ value: 'hide', text: 'Hide', description: 'What doesn’t match isn’t displayed. To preserve the hierarchy parents with matching children are shown demphasised.' },
 	{ value: 'routes', text: 'Routes', description: 'Highlight the matches and open every way to them. The rest is hidden.' },
-	{ value: 'inplace', text: 'In place', description: 'Highlight the matches where they are. Your folds stay, and say how many they hold.' },
-	{ value: 'off', text: 'Off', description: 'Set aside: the tree ignores it until you pick another mode. Nothing is cleared.' },
+	{ value: 'inplace', text: 'In place', description: 'Highlight the matches where they are. Your folds stay, and say how many matches they hold.' },
+	{ value: 'off', text: 'Off', description: 'Disable the filter without losing your query.' },
 ] as const;
+/** A flat list has no ways to a match to open, so Routes hides, as Hide does */
+const flatModes = [
+	{ value: 'hide', text: 'Hide', description: 'What doesn’t match isn’t shown.' },
+	{ value: 'inplace', text: 'In place', description: 'Everything is shown, and the matches are highlighted.' },
+	{ value: 'off', text: 'Off', description: 'Disable the filter without losing your query.' },
+] as const;
+const modes = computed(() => (props.treeActive ? treeModes : flatModes));
+const modeOf = (mode: LayerMode) => (!props.treeActive && mode === 'routes' ? 'hide' : mode);
 
 /**
- * The ↵ on Next only while Enter would do the same: while this bar's search box has focus, with
- * something in it. Anywhere else Enter does something else (in the table, it opens the row).
+ * The key on Next only while that key would do the same: while this bar's search box has focus,
+ * with something in it. Anywhere else Enter does something else (in the table, it opens the row),
+ * and picking items, Enter in the search picks, so it's ↓.
  */
 const nextButton = ref<ComponentPublicInstance>();
 const enterGoesNext = ref(false);
@@ -58,10 +67,17 @@ watch(() => props.offerNext, () => nextTick(trackFocus));
 
 /** One way of going to a match in every mode; it only differs in what has to open first */
 const nextTip = computed(() =>
-	(props.matches && props.highlightMode === 'routes'
-		? 'Select the next match, in the order the rows run, and carry on from it with the arrow keys. Shift-click, or Shift+Enter in the search, goes back. Its way stays open, so clearing the search lands on it.'
-		: 'Select the next match, opening the folds on the way to it and no others, and carry on from it with the arrow keys. Shift-click, or Shift+Enter in the search, goes back. They stay open, so clearing the search lands on it.')
-	+ (props.selectMode ? ' ⌘/Ctrl+Enter then picks it and saves.' : ''),
+	(!props.treeActive || (props.matches && props.highlightMode === 'routes')
+		? 'Select the next match, in the order the rows run, and carry on from it with the arrow keys.'
+		: 'Select the next match, opening the folds on the way to it and no others, and carry on from it with the arrow keys.')
+	+ (props.selectMode
+		? ' ↓ in the search does the same, and Shift-click or ↑ goes back. Enter in the search then picks it, and ⌘/Ctrl+Enter picks it and saves.'
+		: ' ↓ or Enter in the search does the same, and Shift-click, ↑ or Shift+Enter goes back.')
+	+ (!props.treeActive
+		? ''
+		: props.matches && props.highlightMode === 'routes'
+			? ' Its way stays open, so clearing the search lands on it.'
+			: ' They stay open, so clearing the search lands on it.'),
 );
 /**
  * The filter's menu, only while there's a filter to say it about. A search has no menu: its two ways
@@ -74,8 +90,10 @@ const filtering = computed(() => {
 	const all = filter._and;
 	return !(Array.isArray(all) && !all.length);
 });
-const layers = computed(() => (filtering.value ? [{ key: 'filterMode', label: 'Filter', mode: props.filterMode ?? 'hide', tip: 'What the filter does to the tree' }] : []));
-const textOf = (value: string) => modes.find((mode) => mode.value === value)?.text ?? value;
+const layers = computed(() => (filtering.value
+	? [{ key: 'filterMode', label: 'Filter', mode: modeOf(props.filterMode ?? 'hide'), tip: `What the filter does to the ${props.treeActive ? 'tree' : 'list'}` }]
+	: []));
+const textOf = (value: string) => modes.value.find((mode) => mode.value === value)?.text ?? value;
 </script>
 
 <template>
@@ -88,7 +106,7 @@ const textOf = (value: string) => modes.find((mode) => mode.value === value)?.te
 		</span>
 	</transition>
 	<v-button
-		v-if="treeActive && offerNext && matchPosition?.of && goToMatch"
+		v-if="offerNext && matchPosition?.of && goToMatch"
 		ref="nextButton"
 		v-tooltip.bottom="nextTip"
 		class="next"
@@ -96,10 +114,10 @@ const textOf = (value: string) => modes.find((mode) => mode.value === value)?.te
 		secondary
 		@click="goToMatch($event.shiftKey ? -1 : 1)"
 	>
-		{{ matchPosition.at ? `${matchPosition.at}/${matchPosition.of}` : 'Next' }}<template v-if="enterGoesNext">&nbsp;<span class="enter">↵</span></template>
+		{{ matchPosition.at ? `${matchPosition.at}/${matchPosition.of}` : 'Next' }}<template v-if="enterGoesNext">&nbsp;<span class="enter">{{ selectMode ? '↓' : '↵' }}</span></template>
 	</v-button>
 	<!-- Not while picking items: a drawer's header is narrow, and they pushed its Save button off screen -->
-	<template v-if="treeActive && setLayoutOptions && modeMenus !== false && !selectMode">
+	<template v-if="setLayoutOptions && modeMenus !== false && !selectMode">
 		<v-menu
 			v-for="layer in layers"
 			:key="layer.key"

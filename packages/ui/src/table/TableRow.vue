@@ -5,7 +5,7 @@ import type { FunctionalComponent, Ref, Slot, Slots } from 'vue';
 // import type { Header, Item } from "./types";
 import type { Header, Item } from './types';
 import { useTableKit } from './kit';
-import { inject, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, inject } from 'vue';
 
 const props = withDefaults(
 	defineProps<{
@@ -79,13 +79,12 @@ const props = withDefaults(
 // The pointer events too: declared, a new listener from the table doesn't count as a change to redraw for
 const emit = defineEmits(['click', 'dblclick', 'item-selected', 'toggle-children', 'chevron-hover', 'hint-click', 'mouseenter', 'mouseleave', 'mouseover']);
 
-// Told to the table, which says whether the row is far off screen (see its farRows)
-const tableRows = inject<{ added: (row: Element, far: Ref<boolean>) => void; removed: (row: Element) => void } | null>('table-rows', null);
-const rowElement = ref<HTMLElement>();
-/** Far off screen: the row's box, which keeps its height, but no cells. Far until measured. */
-const far = ref(!!tableRows);
-onMounted(() => rowElement.value && tableRows?.added(rowElement.value, far));
-onBeforeUnmount(() => rowElement.value && tableRows?.removed(rowElement.value));
+/**
+ * Far off screen, or folded away (see the table's `isFar`): the row's box, which keeps its height,
+ * but no cells. Only a row whose answer changes redraws as the table scrolls.
+ */
+const rowFar = inject<((key: string, was?: boolean) => boolean) | null>('row-far', null);
+const far = computed((was?: boolean) => !!rowFar && rowFar(String(props.item['--key']), was));
 
 const SlotOf: FunctionalComponent<{ render: Slot; item: Item }> = ({ render, item }) => render({ item });
 
@@ -175,7 +174,6 @@ function usePreventClickAfterDragging({
 
 <template>
 	<tr
-		ref="rowElement"
 		class="table-row"
 		:data-node="item['--node']"
 		:data-key="item['--key']"

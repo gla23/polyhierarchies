@@ -4,7 +4,7 @@ export const animals = fromOutline(
 	{
 		id: 'animals',
 		start: 'mammals',
-		name: 'Animals (a plain tree)',
+		name: 'Animal taxonomy',
 		description:
 			'For contrast: one parent each, no jumps. Every UI should fall back to the ordinary tree it would be without polyhierarchy support.',
 		columns: [

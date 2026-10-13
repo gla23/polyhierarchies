@@ -88,7 +88,7 @@ export const uis: UiEntry[] = [
 		component: TreeTable,
 		about: [
 			"The Directus tree view layout itself: the same component the extension draws in the admin, given this dataset instead of a collection. Only a checkbox, an icon, a menu and a tooltip are stand-ins here; the rest is the extension's own markup and styles, so what you see is what Directus shows.",
-			'It draws placements rather than items: a node with two parents is two rows, in full where it is first reached and a dimmed duplicate everywhere else, which is what lets one table show a taxonomy (one parent each) and a polyhierarchy alike. One column is the tree column, usually the name: it and every column before it move right with each level while it gives up the same width, so every column after it stays in one straight line. It\'s chosen by column rather than counted, so it stays with the name however the columns are dragged about, and the hints go in it.',
+			'It draws placements rather than items: a node with two parents is two rows, in full where it is first reached and a dimmed duplicate everywhere else, which is what lets one table show a taxonomy (one parent each) and a polyhierarchy alike. One column is the indented column, usually the name: it and every column before it move right with each level while it gives up the same width, so every column after it stays in one straight line. It\'s chosen by column rather than counted, so it stays with the name however the columns are dragged about, and the hints go in it.',
 			"Folding works as in the layout: ⌘/Ctrl-click a chevron for everything inside, ⌥/Alt-click for it and its siblings, and the folds you make are remembered in this browser. Searching keeps the tree, three ways (see While searching), the count says how many items it shows and how many of those match, Enter goes to the next match (opening the way to it), and rows can still be dragged. Hovering a row lights its other placements, and the hints act when clicked: \"12 below\" opens the branch, \"in …\" goes to the full placement, \"above\" to the loop's ancestor; each says what it means on hover. What Directus can't do — parent counts, hover echoes, buttons on each row — is in the Tree lab."
 		],
 		editing:
@@ -97,7 +97,7 @@ export const uis: UiEntry[] = [
 			{ ...density, default: 'compact', about: "Directus's three row sizes. Compact is the layout's default, so more of the tree fits on screen." },
 			{
 				key: 'treeColumn',
-				label: 'Tree column',
+				label: 'Indent up to',
 				type: 'choice',
 				default: 'label',
 				choices: [
