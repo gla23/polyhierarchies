@@ -231,6 +231,7 @@ const table = ref<ComponentPublicInstance & {
 	focusTable?: () => void;
 	pickMatch?: () => 'ticked' | 'unticked' | 'went' | null;
 	pickCursor?: () => boolean;
+	shownCursor?: () => Item | null;
 	unfoldCursor?: () => void;
 }>();
 
@@ -297,8 +298,8 @@ const saveButton = () => layoutRoot.value?.closest('.v-drawer')?.querySelector<H
  * ticks the match selected (see the table's `pickMatch`), so typing a name and Enter picks it, and
  * then the search's text is selected for the next one. Esc leaves the search for the table, where
  * the arrow keys carry on. ⌘/Ctrl-F focuses the search, as the browser's find can't see the rows
- * drawn without their cells; pressed again from the search, it's the browser's. Picking items,
- * ⌘/Ctrl+Enter takes the selected row and saves.
+ * drawn without their cells; pressed again from the search, it's the browser's. ⌘/Ctrl+Enter
+ * opens the selected row, from the search as from the table, or picking items takes it and saves.
  */
 type SearchKey = { step: 1 | -1; arrow?: boolean } | 'pick';
 let pending: SearchKey | null = null;
@@ -326,6 +327,17 @@ function onKeydown(event: KeyboardEvent) {
 		// Nothing selected or ticked, nothing's saved: in a taxonomy that would move the item to the top
 		if (table.value?.pickCursor?.() || props.selection?.length)
 			void nextTick(() => save.click());
+		return;
+	}
+	// From the search or the table, not from another field, where it may mean something else
+	const typing = event.target instanceof HTMLElement && event.target !== input
+		&& (event.target.isContentEditable || !!event.target.closest('input, textarea, select'));
+	if (!props.selectMode && event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && !typing) {
+		if (!table.value?.shownCursor?.() || !props.openCursor)
+			return;
+		event.preventDefault();
+		event.stopPropagation();
+		props.openCursor();
 		return;
 	}
 	const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : null;
@@ -381,7 +393,7 @@ watch(() => props.searchedFor, async (searched) => {
 
 /** Where the drawer's Save says its shortcut, drawn into Directus's own button */
 const saveLabel = ref<HTMLElement | null>(null);
-const saveKeys = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘↵' : 'Ctrl+↵';
+const enterKeys = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘↵' : 'Ctrl+↵';
 const findSaveLabel = () => (saveLabel.value ||= props.selectMode ? saveButton()?.querySelector<HTMLElement>('.content') ?? null : null);
 
 onMounted(() => {
@@ -455,7 +467,7 @@ function removeField(fieldKey: string) {
 			v-if="saveLabel"
 			:to="saveLabel"
 		>
-			<span class="save-keys">{{ saveKeys }}</span>
+			<span class="save-keys">{{ enterKeys }}</span>
 		</Teleport>
 		<v-notice
 			v-if="linksError"
@@ -549,7 +561,7 @@ function removeField(fieldKey: string) {
 				<!-- Only where a click selects: elsewhere a click already opens -->
 				<v-button
 					v-if="rowClick === 'selects'"
-					v-tooltip.bottom="`Open ${named(cursorNode)}, as a double-click or Enter does`"
+					v-tooltip.bottom="`Open ${named(cursorNode)}, as a double-click, Enter or ${enterKeys} does`"
 					x-small
 					icon
 					secondary

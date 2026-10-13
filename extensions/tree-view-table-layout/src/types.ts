@@ -28,8 +28,10 @@ export interface LayoutOptions {
 	searchMode?: LayerMode;
 	/** The same for filters: hide, by default, as a filter usually excludes */
 	filterMode?: LayerMode;
-	/** The search and filter menus in the top bar; off keeps the bar clean, the sidebar still has them */
+	/** The filter's menu in the top bar while filtering; off keeps the bar clean, the sidebar still has it */
 	modeMenus?: boolean;
+	/** The same for the search, while searching; off by default */
+	searchMenu?: boolean;
 	/** The faint lines from an open item's chevron down everything inside it */
 	showGuides?: boolean;
 	/** How many levels start open, below which items start folded; unset, everything starts open */

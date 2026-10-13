@@ -27,6 +27,7 @@ interface Props {
 	searchMode: 'routes' | 'inplace';
 	filterMode: LayerMode;
 	modeMenus: boolean;
+	searchMenu: boolean;
 	showGuides: boolean;
 	openDepth: number | null;
 	maxOpenDepth: number | null;
@@ -52,6 +53,7 @@ const emit = defineEmits([
 	'update:searchMode',
 	'update:filterMode',
 	'update:modeMenus',
+	'update:searchMenu',
 	'update:showGuides',
 	'update:openDepth',
 	'update:maxOpenDepth',
@@ -73,6 +75,7 @@ const treeColumnWritable = useSync(props, 'treeColumn', emit);
 const searchModeWritable = useSync(props, 'searchMode', emit);
 const filterModeWritable = useSync(props, 'filterMode', emit);
 const modeMenusWritable = useSync(props, 'modeMenus', emit);
+const searchMenuWritable = useSync(props, 'searchMenu', emit);
 // Flat, there are no routes or folds: a search shows only its matches or marks them among the rest
 const searchModeItems = computed(() => (ready.value
 	? [
@@ -240,7 +243,7 @@ const ready = computed(() =>
 			<small
 				v-if="hierarchy === 'flat'"
 				class="type-note"
-			>The items show as a flat list, nothing nested. {{ keys.inside }}+F goes to the search, where ↓ and ↑ go through the rows and Esc goes into the table. Picking items, Enter picks the one you're on and {{ keys.inside }}+Enter saves.</small>
+			>The items show as a flat list, nothing nested. {{ keys.inside }}+F goes to the search, where ↓ and ↑ go through the rows and Esc goes into the table. {{ keys.inside }}+Enter opens the one you're on, or picking items, Enter picks it and {{ keys.inside }}+Enter saves.</small>
 		</div>
 
 		<div
@@ -466,27 +469,30 @@ const ready = computed(() =>
 	>
 		<div class="field">
 			<div class="type-label">
-				Search
+				Search style
 			</div>
 			<v-select v-model="searchModeWritable" :items="searchModeItems" />
-			<div class="type-label search-label">
-				Filters
+			<v-checkbox
+				v-model="searchMenuWritable"
+				block
+				label="Show search menu"
+				class="checkbox"
+			/>
+			<small class="type-note">Whether to put the above dropdown in the top bar for easy access. It only shows while there's a search.</small>
+		</div>
+
+		<div class="field">
+			<div class="type-label">
+				Filter style
 			</div>
 			<v-select v-model="filterModeShown" :items="modeItems" />
 			<v-checkbox
 				v-model="modeMenusWritable"
 				block
-				label="Filter menu in the top bar while filtering"
+				label="Show filter menu"
 				class="checkbox"
 			/>
-			<small
-				v-if="ready"
-				class="type-note"
-			>A search either opens every way to its matches, hiding the rest, or marks them where they are and keeps your folds; in both, ↓ and ↑ in the search go to the next match and the one before, as Enter and Shift+Enter do (picking items, Enter picks the match you're on). A filter can do either too, hide what doesn't match while keeping your folds, or be turned off without clearing it.</small>
-			<small
-				v-else
-				class="type-note"
-			>A search either shows only its matches, as Directus's own does, or shows everything and marks them; in both, ↓ and ↑ in the search go to the next match and the one before, as Enter and Shift+Enter do (picking items, Enter picks the match you're on). A filter can do either too, or be turned off without clearing it.</small>
+			<small class="type-note">Whether to put the above dropdown in the top bar for easy access. It only shows while there's a filter.</small>
 		</div>
 	</v-detail>
 
@@ -502,7 +508,7 @@ const ready = computed(() =>
 				v-model="rowClickWritable"
 				:items="rowClickItems"
 			/>
-			<small class="type-note">Opens it is Directus's usual behaviour, and {{ keys.siblings }}-click selects a row instead (hold {{ keys.siblings }} to see which). Selects it makes a click select the row, and a double-click opens the item. A selected row's actions follow its name: <template v-if="ready && hierarchy === 'polyhierarchy'">add parents or children, or unlink it from the parent it's under, and </template><template v-else-if="ready">reparent it, and </template>open it when a click selects. Either way, the arrow keys move through the rows and Enter opens one.</small>
+			<small class="type-note">Opens it is Directus's usual behaviour, and {{ keys.siblings }}-click selects a row instead (hold {{ keys.siblings }} to see which). Selects it makes a click select the row, and a double-click opens the item. A selected row's actions follow its name: <template v-if="ready && hierarchy === 'polyhierarchy'">add parents or children, or unlink it from the parent it's under, and </template><template v-else-if="ready">reparent it, and </template>open it when a click selects. Either way, the arrow keys move through the rows and Enter opens one, as {{ keys.inside }}+Enter does from the search.</small>
 		</div>
 	</v-detail>
 
@@ -581,10 +587,6 @@ const ready = computed(() =>
 
 .section .field + .field {
 	margin-top: 20px;
-}
-
-.search-label {
-	margin-top: 12px;
 }
 
 .reset-folds {

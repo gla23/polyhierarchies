@@ -899,6 +899,12 @@ function pickCursor() {
 	return true;
 }
 
+/** The selected row, if it shows and is drawn as selected, for ⌘Enter to open */
+function shownCursor() {
+	const row = cursorRow.value;
+	return row && (keyed.value || props.clickSelects) && !rowHidden(row) ? row : null;
+}
+
 /** Opens the selected row, even with nothing inside yet, so a child just given to it shows */
 function unfoldCursor() {
 	if (cursorRow.value)
@@ -915,7 +921,7 @@ function focusTable() {
 	keyed.value = true;
 	tableEl.value?.focus({ preventScroll: true });
 }
-defineExpose({ goToMatch, focusTable, pickMatch, pickCursor, unfoldCursor });
+defineExpose({ goToMatch, focusTable, pickMatch, pickCursor, shownCursor, unfoldCursor });
 
 /**
  * Rows over a screen away are far, and drawn without their cells: unfolding a big tree builds a few

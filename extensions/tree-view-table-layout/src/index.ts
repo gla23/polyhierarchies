@@ -119,6 +119,8 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			set: (value) => (searchModeStored.value = value),
 		});
 		const modeMenus = syncRefProperty(layoutOptions, 'modeMenus', true);
+		// Off unless asked for: the two ways barely differ in use, and the bar is busy enough
+		const searchMenu = syncRefProperty(layoutOptions, 'searchMenu', false);
 		// Two levels unless a view says otherwise: the shape, without hundreds of rows. -1 is all.
 		const openDepth = syncRefProperty(layoutOptions, 'openDepth', 2);
 		// Deeper, the indent pushes every column after the tree column off screen
@@ -285,6 +287,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			searchMode,
 			filterMode,
 			modeMenus,
+			searchMenu,
 			highlightMode,
 			searching,
 			searchedFor,

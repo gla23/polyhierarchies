@@ -19,8 +19,11 @@ const props = defineProps<{
 	treeActive?: boolean;
 	filterMode?: LayerMode;
 	filterUser?: Filter | null;
+	search?: string | null;
+	searchMode?: 'routes' | 'inplace';
 	setLayoutOptions?: (changes: Record<string, unknown>) => void;
 	modeMenus?: boolean;
+	searchMenu?: boolean;
 	selectMode?: boolean;
 }>();
 
@@ -37,7 +40,12 @@ const flatModes = [
 	{ value: 'inplace', text: 'In place', description: 'Everything is shown, and the matches are highlighted.' },
 	{ value: 'off', text: 'Off', description: 'Disable the filter without losing your query.' },
 ] as const;
-const modes = computed(() => (props.treeActive ? treeModes : flatModes));
+/** A search's: no Off (that's clearing it), and flat, showing only the matches is its routes */
+const treeSearchModes = treeModes.filter((mode) => mode.value === 'routes' || mode.value === 'inplace');
+const flatSearchModes = [
+	{ value: 'routes', text: 'Hide', description: 'What doesn’t match isn’t shown, as Directus’s own search does.' },
+	flatModes[1],
+] as const;
 const modeOf = (mode: LayerMode) => (!props.treeActive && mode === 'routes' ? 'hide' : mode);
 
 /**
@@ -72,17 +80,14 @@ const nextTip = computed(() =>
 		: 'Select the next match, opening the folds on the way to it and no others, and carry on from it with the arrow keys.')
 	+ (props.selectMode
 		? ' ↓ in the search does the same, and Shift-click or ↑ goes back. Enter in the search then picks it, and ⌘/Ctrl+Enter picks it and saves.'
-		: ' ↓ or Enter in the search does the same, and Shift-click, ↑ or Shift+Enter goes back.')
+		: ' ↓ or Enter in the search does the same, and Shift-click, ↑ or Shift+Enter goes back. ⌘/Ctrl+Enter opens it.')
 	+ (!props.treeActive
 		? ''
 		: props.matches && props.highlightMode === 'routes'
 			? ' Its way stays open, so clearing the search lands on it.'
 			: ' They stay open, so clearing the search lands on it.'),
 );
-/**
- * The filter's menu, only while there's a filter to say it about. A search has no menu: its two ways
- * barely differ in use, so that's a sidebar setting.
- */
+/** Each menu only while there's a filter or a search to say it about */
 const filtering = computed(() => {
 	const filter = props.filterUser as Record<string, unknown> | null | undefined;
 	if (!filter || !Object.keys(filter).length)
@@ -90,10 +95,18 @@ const filtering = computed(() => {
 	const all = filter._and;
 	return !(Array.isArray(all) && !all.length);
 });
-const layers = computed(() => (filtering.value
-	? [{ key: 'filterMode', label: 'Filter', mode: modeOf(props.filterMode ?? 'hide'), tip: `What the filter does to the ${props.treeActive ? 'tree' : 'list'}` }]
-	: []));
-const textOf = (value: string) => modes.value.find((mode) => mode.value === value)?.text ?? value;
+const layers = computed(() => {
+	const shape = props.treeActive ? 'tree' : 'list';
+	return [
+		...(props.searchMenu && props.search?.trim()
+			? [{ key: 'searchMode', label: 'Search', mode: props.searchMode ?? 'routes', modes: props.treeActive ? treeSearchModes : flatSearchModes, tip: `What the search does to the ${shape}` }]
+			: []),
+		...(props.modeMenus !== false && filtering.value
+			? [{ key: 'filterMode', label: 'Filter', mode: modeOf(props.filterMode ?? 'hide'), modes: props.treeActive ? treeModes : flatModes, tip: `What the filter does to the ${shape}` }]
+			: []),
+	];
+});
+const textOf = (modes: readonly { value: string; text: string }[], value: string) => modes.find((mode) => mode.value === value)?.text ?? value;
 </script>
 
 <template>
@@ -117,7 +130,7 @@ const textOf = (value: string) => modes.value.find((mode) => mode.value === valu
 		{{ matchPosition.at ? `${matchPosition.at}/${matchPosition.of}` : 'Next' }}<template v-if="enterGoesNext">&nbsp;<span class="enter">{{ selectMode ? '↓' : '↵' }}</span></template>
 	</v-button>
 	<!-- Not while picking items: a drawer's header is narrow, and they pushed its Save button off screen -->
-	<template v-if="setLayoutOptions && modeMenus !== false && !selectMode">
+	<template v-if="setLayoutOptions && !selectMode">
 		<v-menu
 			v-for="layer in layers"
 			:key="layer.key"
@@ -132,12 +145,12 @@ const textOf = (value: string) => modes.value.find((mode) => mode.value === valu
 					secondary
 					@click="toggle"
 				>
-					<span class="mode-label">{{ layer.label }}:</span>&nbsp;{{ textOf(layer.mode) }}
+					<span class="mode-label">{{ layer.label }}:</span>&nbsp;{{ textOf(layer.modes, layer.mode) }}
 				</v-button>
 			</template>
 			<v-list class="modes">
 				<v-list-item
-					v-for="mode in modes"
+					v-for="mode in layer.modes"
 					:key="mode.value"
 					clickable
 					:active="layer.mode === mode.value"
