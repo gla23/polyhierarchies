@@ -126,6 +126,12 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		// Deeper, the indent pushes every column after the tree column off screen
 		const maxOpenDepth = syncRefProperty(layoutOptions, 'maxOpenDepth', 5);
 		const rowClick = syncRefProperty(layoutOptions, 'rowClick', 'opens');
+		/**
+		 * Everything loads at once, tree or flat, so a huge collection would sink the browser and load
+		 * the server. Asked for one more than the limit, it knows when it's past it, and draws nothing.
+		 */
+		const maxItems = syncRefProperty(layoutOptions, 'maxItems', 10000);
+		const itemCap = computed(() => (maxItems.value && maxItems.value > 0 ? maxItems.value : null));
 
 		const { onClick } = useLayoutClickHandler({
 			props,
@@ -162,7 +168,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			getTotalCount,
 		} = useItems(collection, {
 			sort,
-			limit: computed(() => (treeActive.value ? -1 : limit.value)),
+			limit: computed(() => (!treeActive.value && limit.value > 0 ? limit.value : itemCap.value ? itemCap.value + 1 : -1)),
 			// Writable, as useItems puts the page back to 1 when the query changes
 			page: computed({ get: () => (treeActive.value ? 1 : page.value), set: (value) => (page.value = value) }),
 			fields: fieldsToQuery,
@@ -228,6 +234,12 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			const by = tableSort.value?.by;
 			return !!by && by !== sortField.value && by !== primaryKeyField.value?.field;
 		});
+		const { links, linksActive, linkKey, loadLinks, linksError } = useJunction();
+		const over = (count: number) => !!itemCap.value && count > itemCap.value;
+		/** Past the limit, what's too many: a polyhierarchy is drawn from its links too */
+		const tooBig = computed<'items' | 'links' | null>(() =>
+			over(items.value?.length ?? 0) ? 'items' : over(links.value.length) ? 'links' : null,
+		);
 		const { matches, keep, highlightMode, searching, searchedFor } = useSearchMatches();
 		const showing = ref<{ items: number; matching: number } | null>(null);
 		/**
@@ -245,7 +257,6 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		const matchJump = ref<{ step: 1 | -1; n: number } | null>(null);
 		const goToMatch = (step: 1 | -1 = 1) => (matchJump.value = { step, n: (matchJump.value?.n ?? 0) + 1 });
 
-		const { links, linksActive, linkKey, loadLinks, linksError } = useJunction();
 		const { saveEdits, shownItems } = useSaveEdits();
 		const { graph, nodeLabel, itemsById } = useHierarchyGraph();
 		const rowActions = useRowActions();
@@ -304,6 +315,9 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 			showGuides,
 			openDepth,
 			maxOpenDepth,
+			maxItems,
+			itemCap,
+			tooBig,
 			rowClick,
 			linksError,
 			...rowActions,
@@ -779,7 +793,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				}
 				try {
 					const fields = [linkKey.value, junctionParent.value, junctionChild.value, junctionSort.value].filter(Boolean);
-					const response = await api.get(getEndpoint(junction.value!), { params: { fields, limit: -1 } });
+					const response = await api.get(getEndpoint(junction.value!), { params: { fields, limit: itemCap.value ? itemCap.value + 1 : -1 } });
 					links.value = response.data.data ?? [];
 					linksError.value = null;
 				}
@@ -789,7 +803,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				}
 			}
 
-			watch([linksActive, junction, junctionParent, junctionChild, junctionSort], loadLinks, { immediate: true });
+			watch([linksActive, junction, junctionParent, junctionChild, junctionSort, itemCap], loadLinks, { immediate: true });
 
 			return { links, linksActive, linkKey, loadLinks, linksError };
 		}
@@ -801,7 +815,7 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		function useHierarchyGraph() {
 			const graph = computed(() => {
 				const key = primaryKeyField.value?.field;
-				if (!key)
+				if (!key || tooBig.value)
 					return null;
 				const id = `directus:${collection.value}`;
 				if (linksActive.value) {
@@ -1005,16 +1019,16 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 		/**
 		 * Searching or filtering a tree, or marking matches in place in a flat list: Directus finds the
 		 * matching items, with the same search and filter it would have applied to the list, asked
-		 * separately so each can have its own mode. Hide layers keep only what matches (`keep`);
-		 * highlight layers combine, as Directus's search and filter do, both must match (`matches`);
-		 * the search's mode decides how highlights show. Flat, hiding is left to the list's own query.
+		 * separately so each can have its own mode. Hide layers keep only what matches (`keep`), and
+		 * the search highlights within what the filter leaves showing (`matches`); the search's mode
+		 * decides how highlights show. Flat, hiding is left to the list's own query.
 		 */
 		function useSearchMatches() {
 			const api = useApi();
 			const filterSet = ref<Set<string> | null>(null);
 			const searchSet = ref<Set<string> | null>(null);
-			const filterHere = computed(() => !!filterUser.value && filterMode.value !== 'off' && !filterOnServer.value);
-			const searchHere = computed(() => !!search.value && !searchOnServer.value);
+			const filterHere = computed(() => !!filterUser.value && filterMode.value !== 'off' && !filterOnServer.value && !tooBig.value);
+			const searchHere = computed(() => !!search.value && !searchOnServer.value && !tooBig.value);
 			/**
 			 * The search the matches are for, or with the search in the list's query, the search the rows
 			 * came for: Enter in the search waits for them, as picking from a stale answer would tick the
@@ -1065,10 +1079,17 @@ export default defineLayout<LayoutOptions, LayoutQuery>({
 				const present = sets.filter((set): set is Set<string> => !!set);
 				return present.length ? new Set([...present[0]!].filter((id) => present.every((set) => set.has(id)))) : null;
 			};
-			const keep = computed(() => (filterMode.value === 'hide' ? filterSet.value : null));
+			/**
+			 * A search finds whatever the filter leaves showing. A filter showing routes keeps them showing
+			 * as a hiding one would, with the search's highlights among them; one marking in place shows
+			 * everything, so its marks give way to the search's.
+			 */
+			const keep = computed(() =>
+				filterMode.value === 'hide' || (filterMode.value === 'routes' && searchSet.value) ? filterSet.value : null,
+			);
 			const highlights = (mode: LayerMode) => mode === 'routes' || mode === 'inplace';
 			const matches = computed(() => both([
-				highlights(filterMode.value) ? filterSet.value : null,
+				highlights(filterMode.value) && !searchSet.value ? filterSet.value : null,
 				searchSet.value,
 			]));
 			// The search's way of highlighting when searching, else the filter's

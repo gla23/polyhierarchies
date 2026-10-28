@@ -49,6 +49,19 @@ const flatSearchModes = [
 const modeOf = (mode: LayerMode) => (!props.treeActive && mode === 'routes' ? 'hide' : mode);
 
 /**
+ * A search marking the tree takes over the highlights, so a highlighting filter acts otherwise
+ * meanwhile: Routes hides as Hide does, In place is off. Flat, a search that hides goes in the list's
+ * query and leaves the filter as it is.
+ */
+const searchOverrides = computed(() => !!props.search?.trim() && (props.treeActive || props.searchMode === 'inplace'));
+const whileSearching: Partial<Record<LayerMode, { as: LayerMode; note: string }>> = {
+	routes: { as: 'hide', note: 'While searching, it hides what doesn’t match, as Hide does, and the search does the highlighting.' },
+	inplace: { as: 'off', note: 'While searching, it’s off: the search does the highlighting, among everything.' },
+};
+const overridden = (key: string, mode: string) =>
+	key === 'filterMode' && searchOverrides.value ? whileSearching[mode as LayerMode] : undefined;
+
+/**
  * The key on Next only while that key would do the same: while this bar's search box has focus,
  * with something in it. Anywhere else Enter does something else (in the table, it opens the row),
  * and picking items, Enter in the search picks, so it's ↓.
@@ -138,14 +151,17 @@ const textOf = (modes: readonly { value: string; text: string }[], value: string
 			show-arrow
 		>
 			<template #activator="{ toggle }">
+				<!-- Overridden by the search: what it does now, and what it's set to for after -->
 				<v-button
-					v-tooltip.bottom="layer.tip"
+					v-tooltip.bottom="overridden(layer.key, layer.mode)
+						? `Set to ${textOf(layer.modes, layer.mode)}. ${overridden(layer.key, layer.mode)!.note}`
+						: layer.tip"
 					class="mode-button"
 					small
 					secondary
 					@click="toggle"
 				>
-					<span class="mode-label">{{ layer.label }}:</span>&nbsp;{{ textOf(layer.modes, layer.mode) }}
+					<span class="mode-label">{{ layer.label }}:</span>&nbsp;<template v-if="overridden(layer.key, layer.mode)">{{ textOf(layer.modes, overridden(layer.key, layer.mode)!.as) }}&nbsp;<span class="mode-label">while searching</span></template><template v-else>{{ textOf(layer.modes, layer.mode) }}</template>
 				</v-button>
 			</template>
 			<v-list class="modes">
@@ -160,6 +176,10 @@ const textOf = (modes: readonly { value: string; text: string }[], value: string
 						<div class="mode">
 							<span class="mode-name">{{ mode.text }}</span>
 							<small>{{ mode.description }}</small>
+							<small
+								v-if="overridden(layer.key, mode.value)"
+								class="while-searching"
+							>{{ overridden(layer.key, mode.value)!.note }}</small>
 						</div>
 					</v-list-item-content>
 				</v-list-item>
@@ -201,6 +221,10 @@ const textOf = (modes: readonly { value: string; text: string }[], value: string
 
 .mode small {
 	color: var(--theme--foreground-subdued);
+}
+
+.mode .while-searching {
+	color: var(--theme--warning);
 }
 
     .item-count {

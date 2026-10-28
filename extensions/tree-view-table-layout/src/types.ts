@@ -38,6 +38,8 @@ export interface LayoutOptions {
 	openDepth?: number | null;
 	/** The most levels Unfold all and a search's routes open; -1 for no limit */
 	maxOpenDepth?: number | null;
+	/** The most items, or links, the layout loads; past it, it warns instead of drawing. -1 for no limit */
+	maxItems?: number | null;
 	/** What a click on a row does: open the item, as Directus does, or select the row */
 	rowClick?: 'opens' | 'selects';
 }

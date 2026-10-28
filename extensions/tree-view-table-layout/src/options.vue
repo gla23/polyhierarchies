@@ -31,6 +31,7 @@ interface Props {
 	showGuides: boolean;
 	openDepth: number | null;
 	maxOpenDepth: number | null;
+	maxItems: number | null;
 	rowClick: 'opens' | 'selects';
 	sortField: string;
 	collection: string;
@@ -57,6 +58,7 @@ const emit = defineEmits([
 	'update:showGuides',
 	'update:openDepth',
 	'update:maxOpenDepth',
+	'update:maxItems',
 	'update:rowClick',
 	'update:activeFields',
 	'update:fields',
@@ -106,6 +108,20 @@ const filterModeShown = computed({
 const showGuidesWritable = useSync(props, 'showGuides', emit);
 const openDepthWritable = useSync(props, 'openDepth', emit);
 const maxOpenDepthWritable = useSync(props, 'maxOpenDepth', emit);
+const maxItemsWritable = useSync(props, 'maxItems', emit);
+/**
+ * Stored a moment after typing stops: each change reloads everything, and on the way to 50000 it
+ * would ask for 5, 50, 500 and 5000. Empty or 0 is no limit, -1 as stored.
+ */
+let maxItemsTimer: ReturnType<typeof setTimeout> | undefined;
+const maxItemsShown = computed({
+	get: () => (props.maxItems && props.maxItems > 0 ? props.maxItems : null),
+	set: (value: number | string | null) => {
+		clearTimeout(maxItemsTimer);
+		const count = Math.floor(Number(value));
+		maxItemsTimer = setTimeout(() => (maxItemsWritable.value = count > 0 ? count : -1), 600);
+	},
+});
 const rowClickWritable = useSync(props, 'rowClick', emit);
 const rowClickItems = [
 	{ text: 'Opens it', value: 'opens' },
@@ -510,6 +526,23 @@ const ready = computed(() =>
 			/>
 			<small class="type-note">Opens it is Directus's usual behaviour, and {{ keys.siblings }}-click selects a row instead (hold {{ keys.siblings }} to see which). Selects it makes a click select the row, and a double-click opens the item. A selected row's actions follow its name: <template v-if="ready && hierarchy === 'polyhierarchy'">add parents or children, or unlink it from the parent it's under, and </template><template v-else-if="ready">reparent it, and </template>open it when a click selects. Either way, the arrow keys move through the rows and Enter opens one, as {{ keys.inside }}+Enter does from the search.</small>
 		</div>
+
+		<div class="field">
+			<div class="type-label">
+				Most items loaded
+			</div>
+			<v-input
+				v-model="maxItemsShown"
+				type="number"
+				:min="0"
+				placeholder="No limit"
+			/>
+			<small class="type-note">This layout loads every item<template v-if="hierarchy === 'polyhierarchy'"> and link</template> at once, for its tree, search and filters. Past this many it shows a warning instead, rather than slow down the browser and the server; for a collection that big, Directus's own Table layout loads a page at a time. Empty for no limit. <a
+				href="https://gla23.github.io/polyhierarchies/?page=too-big"
+				target="_blank"
+				rel="noopener"
+			>Why there's a limit</a></small>
+		</div>
 	</v-detail>
 
 	<a
@@ -613,5 +646,9 @@ small.type-note {
 
 small.type-note + small.type-note {
 	margin-top: 6px;
+}
+
+small.type-note a {
+	text-decoration: underline;
 }
 </style>

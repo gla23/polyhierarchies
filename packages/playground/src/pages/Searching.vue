@@ -147,9 +147,11 @@ const placements = [
 			lot, where opening every route would bury the tree.
 		</p>
 		<p>
-			In Directus a filter and a search are separate things, so they stack. A filter that hides takes
-			away first; a highlighting filter and the search then combine as Directus combines them, both must
-			match; and the search's way decides how the highlights show. The usual pair is a filter that hides
+			In Directus a filter and a search are separate things, so they stack. The search finds whatever
+			the filter leaves showing: a filter that hides takes away first, one showing routes keeps its
+			routes showing (as if it hid) for the search to highlight within, and one marking in place hides
+			nothing, so the search's marks take over from its own. The search's way decides how the
+			highlights show. The usual pair is a filter that hides
 			(archived items gone) under a search that shows routes (where is "pneumonia"?).
 		</p>
 

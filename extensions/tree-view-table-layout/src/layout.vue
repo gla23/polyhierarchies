@@ -130,6 +130,9 @@ interface Props {
 	setCursor: (row: Item | null) => void;
 	/** The links couldn't be read (no permission) or loaded */
 	linksError: 'forbidden' | 'failed' | null;
+	/** Past the most the layout loads, what's too many, so nothing is drawn */
+	tooBig: 'items' | 'links' | null;
+	itemCap: number | null;
 	/** The selected row's actions, drawn after its name when a click selects */
 	cursorNode?: string | null;
 	cursorParent?: string | null;
@@ -482,6 +485,24 @@ function removeField(fieldKey: string) {
 			</template>
 		</v-notice>
 		<v-notice
+			v-if="tooBig"
+			class="hierarchy-hint"
+			type="warning"
+		>
+			<span>
+				<template v-if="tooBig === 'links'">{{ junction }} has more than {{ itemCap?.toLocaleString() }} links,</template>
+				<template v-else-if="itemCount">There are {{ itemCount.toLocaleString() }} items here,</template>
+				<template v-else>There are more than {{ itemCap?.toLocaleString() }} items here,</template>
+				more than the {{ itemCap?.toLocaleString() }} this layout loads, so they aren't shown. It loads everything at once for its tree, search and filters, and this many could slow down or crash the browser and strain the server.
+				For a collection this big, switch to Directus's own Table layout, which loads a page at a time, or raise the limit under Extras in the layout options.
+				<a
+					href="https://gla23.github.io/polyhierarchies/?page=too-big"
+					target="_blank"
+					rel="noopener"
+				>Why there's a limit</a>
+			</span>
+		</v-notice>
+		<v-notice
 			v-if="hierarchyHint"
 			class="hierarchy-hint"
 			type="info"
@@ -497,7 +518,7 @@ function removeField(fieldKey: string) {
 			</div>
 		</v-notice>
 		<CustomVTable
-			v-if="loading || (itemCount && itemCount > 0 && !error)"
+			v-if="!tooBig && (loading || (itemCount && itemCount > 0 && !error))"
 			ref="table"
 			v-model="selectionWritable"
 			v-model:headers="tableHeadersWritable"
